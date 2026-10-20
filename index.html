@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Callcenter Chaos</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Startbildschirm -->
+  <section id="screen-menu" class="screen active">
+    <div class="menu-box">
+      <h1>☎️ Callcenter Chaos</h1>
+      <p class="tagline">Erfülle die Tagesquote. Überlebe den Chef. Fall nicht auf Scambaiter rein.</p>
+      <button id="btn-start" class="big">Schicht beginnen</button>
+      <div class="howto">
+        <h3>So geht's</h3>
+        <ul>
+          <li>Nimm klingelnde Anrufe an, bevor sie auflegen.</li>
+          <li>Wähle pro Zug eine Masche. Jeder Anrufer hat eine <b>Schwäche</b> und eine <b>Abneigung</b>, achte auf Hinweise im Gespräch.</li>
+          <li>Bei 100&nbsp;% Vertrauen bekommst du <b>Fernzugriff</b>: Klick die Pop-ups weg und überweise, bevor die Zeit abläuft.</li>
+          <li><b>Scambaiter</b> vertrauen dir verdächtig schnell. Leg rechtzeitig auf, sonst gibt's einen Virus.</li>
+          <li>Wenn der Chef vorbeikommt, solltest du telefonieren. Drei Verwarnungen und du fliegst.</li>
+        </ul>
+      </div>
+      <p class="disclaimer">Satire. Alle Figuren sind frei erfunden. Ruft dich jemand Echtes so an: auflegen und melden.</p>
+    </div>
+  </section>
+
+  <!-- Büro / Spielbildschirm -->
+  <section id="screen-game" class="screen">
+    <header class="hud">
+      <div class="hud-item"><span class="label">Tag</span><span id="hud-day">1</span></div>
+      <div class="hud-item"><span class="label">Uhrzeit</span><span id="hud-clock">09:00</span></div>
+      <div class="hud-item quota">
+        <span class="label">Quote</span>
+        <div class="bar"><div id="hud-quota-bar" class="fill"></div></div>
+        <span id="hud-quota">0 € / 500 €</span>
+      </div>
+      <div class="hud-item"><span class="label">Chef-Laune</span><span id="hud-boss">😐</span></div>
+      <div class="hud-item"><span class="label">Verwarnungen</span><span id="hud-strikes">○○○</span></div>
+      <div class="hud-item"><span class="label">Konto</span><span id="hud-bank">0 €</span></div>
+    </header>
+
+    <main class="office">
+      <aside class="phone-panel">
+        <h2>📞 Leitungen</h2>
+        <ul id="call-queue"></ul>
+        <p class="hint" id="queue-empty">Gerade ruhig … verdächtig ruhig.</p>
+      </aside>
+
+      <section class="desk">
+        <div id="desk-idle" class="desk-idle">
+          <div class="monitor">
+            <p>🖥️ Warte auf Anrufe …</p>
+            <p class="hint">Tipp: Der Chef mag es nicht, wenn du rumsitzt.</p>
+          </div>
+        </div>
+
+        <div id="desk-call" class="desk-call hidden">
+          <div class="caller-card">
+            <div id="caller-avatar" class="avatar">👵</div>
+            <div class="caller-info">
+              <h3 id="caller-name">Name</h3>
+              <p id="caller-meta" class="hint"></p>
+              <p id="caller-tags" class="tags"></p>
+            </div>
+            <button id="btn-hangup" class="danger">Auflegen</button>
+          </div>
+
+          <div class="meters">
+            <div class="meter">
+              <span>Vertrauen</span>
+              <div class="bar"><div id="trust-bar" class="fill trust"></div></div>
+            </div>
+            <div class="meter">
+              <span>Geduld</span>
+              <div class="bar"><div id="patience-bar" class="fill patience"></div></div>
+            </div>
+          </div>
+
+          <div id="dialog" class="dialog"></div>
+          <div id="choices" class="choices"></div>
+        </div>
+      </section>
+    </main>
+
+    <div id="boss-alert" class="boss-alert hidden">👔 Der Chef kommt vorbei!</div>
+    <div id="toast" class="toast hidden"></div>
+  </section>
+
+  <!-- Fernzugriff-Minispiel -->
+  <div id="remote" class="overlay hidden">
+    <div class="remote-window">
+      <div class="remote-titlebar">
+        <span>🖱️ Fernzugriff, <span id="remote-victim"></span></span>
+        <span id="remote-timer">8.0s</span>
+      </div>
+      <div id="remote-desktop" class="remote-desktop">
+        <button id="remote-target" class="remote-target">💸 Gutschein einlösen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Feierabend / Mitarbeitergespräch -->
+  <div id="review" class="overlay hidden">
+    <div class="panel">
+      <h2 id="review-title">Mitarbeitergespräch</h2>
+      <div id="review-body"></div>
+      <div id="shop" class="shop"></div>
+      <button id="btn-next-day" class="big">Nächster Tag</button>
+    </div>
+  </div>
+
+  <!-- Game Over -->
+  <div id="gameover" class="overlay hidden">
+    <div class="panel">
+      <h2>📦 Gefeuert!</h2>
+      <p id="gameover-text"></p>
+      <button id="btn-restart" class="big">Neu bewerben</button>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
