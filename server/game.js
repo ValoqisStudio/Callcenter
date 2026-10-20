@@ -6,6 +6,7 @@ import {
   FIRST_NAMES, LAST_NAMES, AVATARS, CITIES, QUIRKS, SPEECH_STYLES, BAITER_ALIASES, UPGRADES, CATEGORIES,
 } from "./data.js";
 import { callerTurn, COMPLY_TRUST } from "./ai.js";
+import { prefetchVoice } from "./tts.js";
 
 // Für Tests lässt sich der Arbeitstag per Umgebungsvariable verkürzen
 const BASE_DAY_SECONDS = Number(process.env.CALLCENTER_DAY_SECONDS) || 240;
@@ -178,7 +179,7 @@ function makeCaller(room) {
     skeptical,
     isBaiter,
     wallet: Math.round(rand(150, 320) * (1 + room.day * 0.15) * (skeptical ? 1.5 : 1) * (room.upgrades.has("leads") ? 1.25 : 1)),
-    trust: skeptical ? 0 : 10,
+    trust: isBaiter ? 20 : skeptical ? 10 : 25,
     patience,
     maxPatience: patience,
     stage: "ringing",
@@ -231,9 +232,9 @@ export function tick(room, dt) {
     if (c.stage !== "away") continue;
     if (!c.awayCalled && now > c.awayUntil + 8000) {
       c.awayCalled = true;
-      c.history.push({ role: "caller", text: "Hallo? Sind Sie noch dran? Ich bin wieder da!" });
+      callerSays(c, "Hallo? Sind Sie noch dran? Ich bin wieder da!");
     } else if (now > c.awayUntil + 35_000) {
-      c.history.push({ role: "caller", text: "Na, dann eben nicht. Ich behalte die Karten!" });
+      callerSays(c, "Na, dann eben nicht. Ich behalte die Karten!");
       endCall(room, c, "📴 Der Anrufer hat zu lange gewartet.");
     }
   }
@@ -389,7 +390,7 @@ function answer(room, player, callId) {
   call.owner = player.id;
   player.callId = call.id;
   const shown = call.isBaiter ? call.alias : call.name;
-  call.history.push({ role: "caller", text: pick(["Ja, hallo?", "Hallo? Bin ich da richtig?", `Hallo, hier ist ${shown.split(" ")[1]}?`, "Ja … hallo? Hört man mich?"]) });
+  callerSays(call, pick(["Ja, hallo?", "Hallo? Bin ich da richtig?", `Hallo, hier ist ${shown.split(" ")[1]}?`, "Ja … hallo? Hört man mich?"]));
 }
 
 async function say(room, player, call, rawText) {
@@ -422,7 +423,7 @@ async function say(room, player, call, rawText) {
 
   call.trust = clamp(call.trust + result.trustDelta, 0, 100);
   call.lastDelta = result.trustDelta;
-  call.history.push({ role: "caller", text: result.reply });
+  callerSays(call, result.reply);
 
   if (result.hangsUp) {
     endCall(room, call, "📴 Der Anrufer hat aufgelegt.");
@@ -447,7 +448,7 @@ async function say(room, player, call, rawText) {
   }
 
   if (call.patience <= 0) {
-    call.history.push({ role: "caller", text: "So, ich hab jetzt keine Zeit mehr. Tschüss!" });
+    callerSays(call, "So, ich hab jetzt keine Zeit mehr. Tschüss!");
     endCall(room, call, "📴 Die Geduld war am Ende.");
   }
 }
@@ -461,6 +462,12 @@ function fakeCardNumber() {
   return ["0000", ...Array.from({ length: 3 }, () => String(randInt(0, 9999)).padStart(4, "0"))].join(" ");
 }
 
+// Anrufer sagt etwas; die Stimme wird sofort im Hintergrund erzeugt
+function callerSays(call, text, extra = {}) {
+  call.history.push({ role: "caller", text, ...extra });
+  prefetchVoice(call, text);
+}
+
 function giveGiftcard(room, player, call) {
   const amount = Math.min(call.wallet, Math.max(20, Math.round((call.wallet * rand(0.4, 0.65)) / 5) * 5));
   call.wallet -= amount;
@@ -469,11 +476,7 @@ function giveGiftcard(room, player, call) {
   call.patience = Math.max(call.patience, 3);
   const code = fakeGiftCode();
   player.pending.push({ type: "giftcard", code, amount, baiter: call.isBaiter, callId: call.id });
-  call.history.push({
-    role: "caller",
-    secret: true,
-    text: `${pick(["Ja, ja, ich bin wieder da! Puh, ganz außer Atem.", "So, da bin ich wieder!", "Ja, hier! Ich hab sie!"])} Ich hab eine Karte über ${amount} Euro. Der Code ist ${code}.`,
-  });
+  callerSays(call, `${pick(["Ja, ja, ich bin wieder da! Puh, ganz außer Atem.", "So, da bin ich wieder!", "Ja, hier! Ich hab sie!"])} Ich hab eine Karte über ${amount} Euro. Der Code ist ${code}.`, { secret: true });
 }
 
 function giveCard(player, call) {
@@ -486,11 +489,7 @@ function giveCard(player, call) {
   // Mit der Karte wird abgebucht, was der Anrufer noch hat
   player.pending.push({ type: "card", ...card, amount: call.wallet, baiter: call.isBaiter, callId: call.id });
   call.wallet = 0;
-  call.history.push({
-    role: "caller",
-    secret: true,
-    text: `So, Brille auf … Die Nummer ist ${card.number}. Gültig bis ${card.expiry}. Und hinten steht ${card.cvc}.`,
-  });
+  callerSays(call, `So, Brille auf … Die Nummer ist ${card.number}. Gültig bis ${card.expiry}. Und hinten steht ${card.cvc}.`, { secret: true });
 }
 
 const normalize = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -538,7 +537,7 @@ function payout(room, player, item, method) {
       pushEvent(room, { type: "virus", target: player.id, text: `🦠 ${player.name} ist auf einen Scambaiter reingefallen! Virus kostet ${loss} €. Das Video geht viral …`, bad: true });
     }
     if (call && call.stage !== "done") {
-      call.history.push({ role: "caller", text: "HAHA! Gruß an meine 2 Millionen Zuschauer! 👋" });
+      callerSays(call, "HAHA! Gruß an meine 2 Millionen Zuschauer! 👋");
       endCall(room, call, null);
     }
     return;

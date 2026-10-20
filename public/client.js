@@ -113,6 +113,7 @@ let currentAudio = null;
 
 function speak(call, text, index) {
   if (!voiceOn) return;
+  if (listening && !heardSomething) stopListening();
   if (config.tts && index != null && Date.now() > ttsRetryAt && session) {
     const job = { call, text, audio: fetchVoice(call, index) };
     audioQueue.push(job);
@@ -137,6 +138,7 @@ async function playNext() {
   const job = audioQueue.shift();
   if (!job) {
     currentAudio = null;
+    setTimeout(micTick, 250);
     return;
   }
   currentAudio = job;
@@ -173,6 +175,7 @@ function browserSpeak(call, text) {
   if (v) u.voice = v;
   u.pitch = clamp((call.gender === "f" ? 1.15 : 0.8) + (call.age > 80 ? -0.15 : 0), 0.1, 2);
   u.rate = call.age > 80 ? 0.88 : 0.98;
+  u.onend = () => setTimeout(micTick, 250);
   speechSynthesis.speak(u);
 }
 
@@ -186,36 +189,90 @@ function stopSpeaking() {
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognizer = null;
 let listening = false;
+let heardSomething = false;
+let sendTimer = null;
+// Freisprechen: Mikro hört im Gespräch automatisch zu und sendet nach einer kurzen Pause
+let handsFree = !!Recognition && (store("handsFree") ?? true);
+
+function isSpeaking() {
+  return !!currentAudio || audioQueue.length > 0 || ("speechSynthesis" in window && speechSynthesis.speaking);
+}
+
+function updateMicButton() {
+  const btn = $("btn-mic");
+  btn.classList.toggle("listening", listening);
+  btn.classList.toggle("on", handsFree);
+  if (!Recognition) return;
+  btn.title = handsFree ? "Freisprechen ist an (klicken zum Ausschalten)" : "Freisprechen einschalten";
+  const call = myCall();
+  if (listening) $("in-say").placeholder = "🎤 Ich höre zu … sprich einfach.";
+  else if (call && call.stage === "away") $("in-say").placeholder = "Der Anrufer ist unterwegs … frag gleich, ob er wieder da ist.";
+  else $("in-say").placeholder = handsFree ? "🎤 Freisprechen an · oder tippen" : IS_TOUCH ? "Was sagst du?" : "Was sagst du? (Enter zum Senden)";
+}
 
 function startListening() {
-  if (!Recognition || listening) return;
+  if (!Recognition || listening || !seated) return;
   const call = myCall();
   if (!call || !canTalk(call)) return;
-  stopSpeaking();
+  heardSomething = false;
   recognizer = new Recognition();
   recognizer.lang = "de-DE";
   recognizer.interimResults = true;
   recognizer.continuous = true;
   recognizer.onresult = (e) => {
-    let text = "";
-    for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;
-    $("in-say").value = text.trim();
+    let finalText = "";
+    let interim = "";
+    for (let i = 0; i < e.results.length; i++) {
+      if (e.results[i].isFinal) finalText += e.results[i][0].transcript + " ";
+      else interim += e.results[i][0].transcript;
+    }
+    const text = (finalText + interim).trim();
+    if (!text) return;
+    heardSomething = true;
+    $("in-say").value = text;
+    clearTimeout(sendTimer);
+    // Kurze Pause nach dem Sprechen = fertig, dann automatisch senden
+    sendTimer = setTimeout(stopListening, interim.trim() ? 1400 : 700);
   };
   recognizer.onerror = (e) => {
-    if (e.error === "not-allowed") toast("🎤 Mikrofon-Zugriff wurde verweigert.", { bad: true });
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+      handsFree = false;
+      store("handsFree", false);
+      toast("🎤 Mikrofon-Zugriff wurde verweigert. Erlaube ihn in den Browser-Einstellungen.", { bad: true });
+    }
   };
   recognizer.onend = () => {
     listening = false;
-    $("btn-mic").classList.remove("listening");
-    if ($("in-say").value.trim()) sendSay();
+    recognizer = null;
+    clearTimeout(sendTimer);
+    if (heardSomething && $("in-say").value.trim()) sendSay();
+    heardSomething = false;
+    updateMicButton();
+    setTimeout(micTick, 400);
   };
-  recognizer.start();
+  try {
+    recognizer.start();
+  } catch {
+    recognizer = null;
+    return;
+  }
   listening = true;
-  $("btn-mic").classList.add("listening");
+  updateMicButton();
 }
 
 function stopListening() {
+  clearTimeout(sendTimer);
   if (recognizer && listening) recognizer.stop();
+}
+
+// Mikro automatisch (wieder) einschalten, wenn man dran ist und der Anrufer nicht spricht
+function micTick() {
+  if (!handsFree || listening || !seated) return;
+  // Wer gerade tippt, wird nicht vom Mikro überschrieben
+  if (document.activeElement === $("in-say") && $("in-say").value.trim()) return;
+  const call = myCall();
+  if (!call || !canTalk(call) || isSpeaking()) return;
+  startListening();
 }
 
 // ---------------------------------------------------------------------------
@@ -637,11 +694,11 @@ function renderCall() {
   $("cheats").classList.toggle("hidden", call.stage !== "talk");
   $("in-say").disabled = !talk;
   $("btn-say").disabled = !talk;
-  $("btn-mic").disabled = !talk || !Recognition;
-  $("btn-mic").title = Recognition ? "Sprechen (Taste V gedrückt halten)" : "Spracheingabe wird von diesem Browser nicht unterstützt (Chrome/Edge nutzen)";
-  $("in-say").placeholder = call.stage === "away"
-    ? "Der Anrufer ist unterwegs … frag gleich, ob er wieder da ist."
-    : IS_TOUCH ? "Was sagst du?" : "Was sagst du? (Enter zum Senden)";
+  $("btn-mic").disabled = !Recognition || readonly;
+  if (!Recognition) $("btn-mic").title = "Spracheingabe wird von diesem Browser nicht unterstützt (Chrome/Edge nutzen)";
+  if (!talk && listening) stopListening();
+  updateMicButton();
+  micTick();
 }
 
 function renderCheats() {
@@ -716,6 +773,7 @@ function renderGameOver() {
 // ---------------------------------------------------------------------------
 
 function sendSay() {
+  clearTimeout(sendTimer);
   const text = $("in-say").value.trim();
   const call = myCall();
   if (!text || !call || !canTalk(call)) return;
@@ -760,7 +818,17 @@ $("card-form").onsubmit = (e) => {
 
 // Tastatur: Esc = aufstehen, Tab = direkt an den Platz, V gedrückt halten = sprechen
 const typingTarget = (el) => el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA");
-$("btn-mic").onclick = () => (listening ? stopListening() : startListening());
+$("btn-mic").onclick = () => {
+  handsFree = !handsFree;
+  store("handsFree", handsFree);
+  if (handsFree) {
+    toast("🎤 Freisprechen an: Einfach reden, nach einer kurzen Pause wird gesendet.");
+    micTick();
+  } else {
+    stopListening();
+  }
+  updateMicButton();
+};
 document.addEventListener("keydown", (e) => {
   if (!state || state.phase !== "day") return;
   if (e.key === "Escape" && seated) {
@@ -783,7 +851,12 @@ document.addEventListener("keyup", (e) => {
 });
 
 // Lesezugriff für Debugging und automatisierte Tests
-window.callcenter = { state: () => state, session: () => session, myCall };
+window.callcenter = {
+  state: () => state,
+  session: () => session,
+  myCall,
+  mic: () => ({ handsFree, listening, seated, speaking: isSpeaking(), audio: !!currentAudio, queue: audioQueue.length, synth: "speechSynthesis" in window && speechSynthesis.speaking }),
+};
 
 // ---------------------------------------------------------------------------
 // Start

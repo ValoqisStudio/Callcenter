@@ -192,6 +192,7 @@ kbd { background: #3a3f52; border-radius: 4px; padding: 1px 6px; font-size: .85e
 .talk-row { display: flex; gap: 8px; }
 .talk-row input { flex: 1; }
 .mic { font-size: 1.2rem; padding: 6px 12px; }
+.mic.on { background: #2b5a40; border-color: var(--good); }
 .mic.listening { background: var(--bad); animation: pulse-mic .8s infinite alternate; }
 @keyframes pulse-mic { from { box-shadow: 0 0 0 0 #ff5c6c88; } to { box-shadow: 0 0 0 8px #ff5c6c00; } }
 .cheats { display: flex; flex-wrap: wrap; gap: 6px; }

@@ -9,7 +9,7 @@ const MODEL = process.env.ELEVENLABS_MODEL || "eleven_flash_v2_5";
 
 let voices = { f: [], m: [] };
 let pausedUntil = 0;
-const cache = new Map(); // Text+Stimme -> Buffer
+const cache = new Map(); // Text+Stimme -> Promise<Buffer>
 const MAX_CACHE = 150;
 
 export const ttsAvailable = () => !!KEY && (voices.f.length + voices.m.length > 0) && Date.now() > pausedUntil;
@@ -63,15 +63,30 @@ export function spokenText(text) {
 
 export class TtsUnavailable extends Error {}
 
-export async function synthesize(call, rawText) {
-  if (!ttsAvailable()) throw new TtsUnavailable("Sprachausgabe nicht verfügbar");
+export function synthesize(call, rawText) {
+  if (!ttsAvailable()) return Promise.reject(new TtsUnavailable("Sprachausgabe nicht verfügbar"));
   const voice = voiceFor(call);
   const text = spokenText(rawText);
-  if (!text) throw new TtsUnavailable("Nichts zu sagen");
+  if (!text) return Promise.reject(new TtsUnavailable("Nichts zu sagen"));
   const key = `${voice.id}|${text}`;
+  // Auch laufende Anfragen merken, damit Vorab-Erzeugung und Abruf sich nicht doppeln
   if (cache.has(key)) return cache.get(key);
+  const job = requestAudio(voice, text).catch((err) => {
+    cache.delete(key);
+    throw err;
+  });
+  cache.set(key, job);
+  if (cache.size > MAX_CACHE) cache.delete(cache.keys().next().value);
+  return job;
+}
 
-  const res = await fetch(`${BASE}/v1/text-to-speech/${voice.id}?output_format=mp3_44100_64`, {
+// Sofort erzeugen, sobald der Anrufer etwas sagt; der Browser holt es dann ohne Wartezeit ab
+export function prefetchVoice(call, text) {
+  if (ttsAvailable()) synthesize(call, text).catch(() => {});
+}
+
+async function requestAudio(voice, text) {
+  const res = await fetch(`${BASE}/v1/text-to-speech/${voice.id}?output_format=mp3_44100_64&optimize_streaming_latency=3`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "xi-api-key": KEY, Accept: "audio/mpeg" },
     body: JSON.stringify({
@@ -80,7 +95,7 @@ export async function synthesize(call, rawText) {
       language_code: "de",
       voice_settings: { stability: 0.4, similarity_boost: 0.75, style: 0.3 },
     }),
-    signal: AbortSignal.timeout(20_000),
+    signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -91,8 +106,5 @@ export async function synthesize(call, rawText) {
     }
     throw new TtsUnavailable(`ElevenLabs ${res.status}`);
   }
-  const audio = Buffer.from(await res.arrayBuffer());
-  cache.set(key, audio);
-  if (cache.size > MAX_CACHE) cache.delete(cache.keys().next().value);
-  return audio;
+  return Buffer.from(await res.arrayBuffer());
 }

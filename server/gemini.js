@@ -20,12 +20,12 @@ class GeminiError extends Error {
   }
 }
 
-async function request(path, body) {
+async function request(path, body, timeoutMs = 15_000) {
   const res = await fetch(`${BASE}${path}`, {
     method: body ? "POST" : "GET",
     headers: { "Content-Type": "application/json", "x-goog-api-key": KEY },
     body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(25_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new GeminiError(data.error?.message || `HTTP ${res.status}`, res.status);
@@ -72,33 +72,61 @@ const SCHEMA = {
   propertyOrdering: ["reply", "trust_delta", "hangs_up", "approach", "request", "complies"],
 };
 
+// Nachdenken kostet Sekunden; für schnelle Telefon-Antworten so wenig wie möglich.
+// Gemini 2.x nimmt ein Token-Budget, Gemini 3+ eine Stufe. Lehnt ein Modell das ab, ohne.
+const noThinkingConfig = new Set();
+function thinkingFor(model) {
+  if (noThinkingConfig.has(model)) return undefined;
+  const version = Number((model.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
+  return version >= 3 ? { thinkingLevel: "minimal" } : { thinkingBudget: 0 };
+}
+
 // Liefert das rohe JSON-Objekt der Antwort; wirft bei Fehlern (der Aufrufer fällt dann auf offline zurück)
 export async function geminiTurn(system, prompt) {
   const tried = [];
-  for (const model of models) {
+  const queue = [...models];
+  while (queue.length) {
+    const model = queue.shift();
     if (cooldownUntil.get(model) > Date.now()) continue;
+    // Höchstens zwei Modelle pro Zug, damit niemand ewig auf eine Antwort wartet
+    if (tried.length >= 2) break;
     tried.push(model);
     try {
-      const data = await request(`/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-        systemInstruction: { parts: [{ text: system }] },
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: SCHEMA,
-          temperature: 0.9,
-          maxOutputTokens: 4096,
-        },
-      });
+      const generationConfig = {
+        responseMimeType: "application/json",
+        responseSchema: SCHEMA,
+        temperature: 0.9,
+        maxOutputTokens: 800,
+      };
+      const thinking = thinkingFor(model);
+      if (thinking) generationConfig.thinkingConfig = thinking;
+      let data;
+      try {
+        data = await request(`/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig,
+        }, 8_000);
+      } catch (err) {
+        if (err.status === 400 && thinking && /think/i.test(err.message)) {
+          noThinkingConfig.add(model);
+          tried.pop();
+          queue.unshift(model); // gleich nochmal ohne thinkingConfig
+          continue;
+        }
+        throw err;
+      }
       const cand = data.candidates?.[0];
       const text = (cand?.content?.parts || []).map((p) => p.text || "").join("");
       if (!text) throw new GeminiError(`Leere Antwort (${data.promptFeedback?.blockReason || cand?.finishReason || "unbekannt"})`, 200);
       return JSON.parse(text);
     } catch (err) {
       // Limit erreicht, Modell weg oder gesperrt: kurz pausieren und das nächste nehmen
-      if ([429, 403, 404, 503].includes(err.status)) {
+      if ([429, 403, 404, 500, 503].includes(err.status) || err.name === "TimeoutError") {
         const perDay = /per.?day|daily/i.test(err.message);
         cooldownUntil.set(model, Date.now() + (err.status === 404 ? 3_600_000 : perDay ? 1_800_000 : 60_000));
-        console.warn(`[gemini] ${model}: ${err.status} ${err.message.slice(0, 120)}`);
+        if (err.name === "TimeoutError") cooldownUntil.set(model, Date.now() + 20_000);
+        console.warn(`[gemini] ${model}: ${err.status || err.name} ${err.message.slice(0, 120)}`);
         continue;
       }
       throw err;
