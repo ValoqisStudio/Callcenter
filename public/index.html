@@ -2,7 +2,9 @@
 <html lang="de">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1b1d24">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Call Center</title>
   <link rel="stylesheet" href="style.css">
   <script type="importmap">
@@ -75,9 +77,9 @@
         <span id="hud-quota">0 € / 500 €</span>
       </div>
       <div class="hud-item"><span class="label">Chef-Laune</span><span id="hud-boss">😐</span></div>
-      <div class="hud-item"><span class="label">Verwarnungen</span><span id="hud-strikes">○○○</span></div>
-      <div class="hud-item"><span class="label">Konto</span><span id="hud-bank">0 €</span></div>
-      <div class="hud-item"><span class="label">Büro</span><span id="hud-code">----</span></div>
+      <div class="hud-item"><span class="label">Verw.</span><span id="hud-strikes">○○○</span></div>
+      <div class="hud-item hide-sm"><span class="label">Konto</span><span id="hud-bank">0 €</span></div>
+      <div class="hud-item hide-sm"><span class="label">Büro</span><span id="hud-code">----</span></div>
       <div id="hud-ringing" class="hud-ringing hidden">📞 <span id="hud-ring-count">0</span></div>
       <button id="btn-goto-desk" class="icon-btn" title="Direkt an deinen Platz (Tab)">🪑</button>
       <button id="btn-voice" class="icon-btn" title="Stimmen an/aus">🔊</button>
@@ -87,23 +89,28 @@
     <div id="focus-hint" class="focus-hint hidden"></div>
     <div id="click-to-play" class="click-to-play">
       <div>
-        <h2>🖱️ Klicken zum Spielen</h2>
-        <p><kbd>WASD</kbd> laufen · <kbd>Maus</kbd> umsehen · <kbd>E</kbd> benutzen · <kbd>Shift</kbd> rennen · <kbd>Tab</kbd> direkt an den Platz</p>
+        <h2 id="ctp-title">🖱️ Klicken zum Spielen</h2>
+        <p id="ctp-keys"><kbd>WASD</kbd> laufen · <kbd>Maus</kbd> umsehen · <kbd>E</kbd> benutzen · <kbd>Shift</kbd> rennen · <kbd>Tab</kbd> direkt an den Platz</p>
         <p class="hint">Geh zu deinem Platz (dein Name steht dran) und setz dich hin.</p>
       </div>
     </div>
     <div id="boss-alert" class="boss-alert hidden">👔 Der Chef läuft durchs Büro! Alle ans Telefon!</div>
 
     <!-- Der PC am Platz -->
-    <div id="pc" class="pc hidden">
+    <div id="pc" class="pc hidden" data-tab="calls">
       <div class="pc-screen">
         <div class="pc-taskbar">
           <span>🖥️ CallOS 98 · Platz <span id="pc-desk"></span></span>
           <span id="pc-clock"></span>
           <button id="btn-stand">Aufstehen [Esc]</button>
         </div>
+        <nav class="pc-tabs">
+          <button data-tab="calls">📞 Anrufe <span id="tab-ring" class="badge hidden"></span></button>
+          <button data-tab="talk">💬 Gespräch</button>
+          <button data-tab="apps">🧾 Einlösen</button>
+        </nav>
         <div class="pc-body">
-          <aside class="pc-col">
+          <aside class="pc-col" data-tab="calls">
             <h3>📞 Eingehende Anrufe</h3>
             <ul id="call-queue"></ul>
             <p class="hint" id="queue-empty">Gerade ruhig … verdächtig ruhig.</p>
@@ -133,7 +140,7 @@
             <p class="hint" id="team-empty">Niemand telefoniert.</p>
           </aside>
 
-          <section class="pc-col pc-main">
+          <section class="pc-col pc-main" data-tab="talk">
             <div id="dialog" class="dialog">
               <p class="hint dialog-empty">Kein Gespräch. Nimm einen Anruf an.</p>
             </div>
@@ -145,7 +152,7 @@
             <div id="cheats" class="cheats"></div>
           </section>
 
-          <aside class="pc-col">
+          <aside class="pc-col" data-tab="apps">
             <div class="app">
               <h3>🎁 Gutschein-Portal</h3>
               <form id="redeem-form" class="app-form">

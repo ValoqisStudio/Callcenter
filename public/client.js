@@ -1,4 +1,4 @@
-import { createOffice } from "./office3d.js";
+import { createOffice, IS_TOUCH } from "./office3d.js";
 
 // ---------------------------------------------------------------------------
 // Grundlagen
@@ -364,8 +364,18 @@ function sitDown() {
   seated = true;
   office.sitAt(p.desk);
   act({ type: "sit", seated: true });
+  setPcTab(me().callId ? "talk" : "calls");
   renderOverlays();
-  setTimeout(() => $("in-say").focus(), 400);
+  if (!IS_TOUCH) setTimeout(() => $("in-say").focus(), 400);
+}
+
+// Auf dem Handy zeigt der PC immer nur einen Bereich (Anrufe, Gespräch, Einlösen)
+function setPcTab(tab) {
+  $("pc").dataset.tab = tab;
+  if (tab === "talk") {
+    const d = $("dialog");
+    d.scrollTop = d.scrollHeight;
+  }
 }
 
 function standUp() {
@@ -376,6 +386,8 @@ function standUp() {
   office.stand();
   act({ type: "sit", seated: false });
   document.activeElement?.blur();
+  // Am Handy direkt weiterlaufen können
+  if (IS_TOUCH) office.activate();
   renderOverlays();
 }
 
@@ -425,7 +437,7 @@ function render() {
 function renderOverlays() {
   if (!state || state.phase === "lobby") return;
   const day = state.phase === "day";
-  const locked = office && office.isLocked();
+  const locked = office && office.isActive();
   $("pc").classList.toggle("hidden", !(day && seated));
   $("click-to-play").classList.toggle("hidden", !day || seated || locked);
   $("crosshair").classList.toggle("hidden", !locked);
@@ -471,6 +483,9 @@ function renderHud() {
 }
 
 function renderPc() {
+  const waiting = state.queue.length;
+  $("tab-ring").textContent = waiting;
+  $("tab-ring").classList.toggle("hidden", !waiting || !!me().callId);
   $("pc-desk").textContent = me().desk + 1;
   $("pc-clock").textContent = `${clockText()} Uhr`;
   renderQueue();
@@ -500,7 +515,8 @@ function renderQueue() {
         lastCall = null;
         sfx.pickup();
         act({ type: "answer", callId: c.id });
-        setTimeout(() => $("in-say").focus(), 200);
+        setPcTab("talk");
+        if (!IS_TOUCH) setTimeout(() => $("in-say").focus(), 200);
       };
       li.appendChild(btn);
       ul.appendChild(li);
@@ -625,7 +641,7 @@ function renderCall() {
   $("btn-mic").title = Recognition ? "Sprechen (Taste V gedrückt halten)" : "Spracheingabe wird von diesem Browser nicht unterstützt (Chrome/Edge nutzen)";
   $("in-say").placeholder = call.stage === "away"
     ? "Der Anrufer ist unterwegs … frag gleich, ob er wieder da ist."
-    : "Was sagst du? (Enter zum Senden)";
+    : IS_TOUCH ? "Was sagst du?" : "Was sagst du? (Enter zum Senden)";
 }
 
 function renderCheats() {
@@ -721,7 +737,7 @@ $("btn-hangup").onclick = () => { stopSpeaking(); act({ type: "hangup" }); };
 $("btn-say").onclick = sendSay;
 $("btn-stand").onclick = standUp;
 $("btn-goto-desk").onclick = goToDesk;
-$("click-to-play").onclick = () => office && office.lock();
+$("click-to-play").onclick = () => office && office.activate();
 $("in-say").addEventListener("keydown", (e) => { if (e.key === "Enter") sendSay(); });
 $("btn-voice").onclick = () => {
   voiceOn = !voiceOn;
@@ -773,7 +789,18 @@ window.callcenter = { state: () => state, session: () => session, myCall };
 // Start
 // ---------------------------------------------------------------------------
 
+document.querySelectorAll(".pc-tabs button").forEach((b) => { b.onclick = () => setPcTab(b.dataset.tab); });
+// Nach einem Einlöse-Versuch auf dem Handy wieder zum Gespräch
+$("redeem-form").addEventListener("submit", () => { if (IS_TOUCH && myCall() && myCall().stage !== "done") setTimeout(() => setPcTab("talk"), 600); });
+
 (async function init() {
+  if (IS_TOUCH) {
+    $("ctp-title").textContent = "👆 Tippen zum Spielen";
+    $("ctp-keys").innerHTML = "Links mit dem <b>Joystick</b> laufen · rechts <b>wischen</b> zum Umsehen · <b>✋</b> zum Benutzen · <b>🪑</b> oben springt direkt an deinen Platz";
+    $("crosshair").textContent = "•";
+    $("btn-stand").textContent = "Aufstehen";
+    $("in-say").placeholder = "Was sagst du?";
+  }
   $("in-name").value = store("name") || "";
   try {
     config = await api("/api/config");
