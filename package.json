@@ -1,0 +1,17 @@
+{
+  "name": "call-center",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Call Center: satirisches Koop-Callcenter-Spiel mit KI-Anrufern",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0"
+  }
+}
