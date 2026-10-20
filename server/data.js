@@ -63,7 +63,7 @@ export const UPGRADES = [
   { id: "headset", name: "🎧 Profi-Headset", desc: "Anrufer haben +2 Geduld.", cost: 150 },
   { id: "notes", name: "📝 Spickzettel", desc: "Zeigt die Schwäche jedes Anrufers.", cost: 250 },
   { id: "coffee", name: "☕ Kaffeemaschine", desc: "Der Arbeitstag dauert 30 Sekunden länger.", cost: 120 },
-  { id: "monitor", name: "🖥️ Zweiter Monitor", desc: "Mehr Zeit beim Fernzugriff und am Kartenterminal.", cost: 180 },
+  { id: "leads", name: "📈 Premium-Leads", desc: "Anrufer haben 25 % mehr Geld.", cost: 220 },
   { id: "radar", name: "📡 Baiter-Radar", desc: "Scambaiter werden markiert.", cost: 300 },
   { id: "antivirus", name: "🛡️ Antivirus", desc: "Blockt einen Virus pro Tag.", cost: 200 },
   { id: "terminal", name: "💳 Wegwerf-Terminal", desc: "Kreditkarten werden seltener zurückgebucht.", cost: 260 },

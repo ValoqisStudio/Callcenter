@@ -12,6 +12,11 @@ import { UPGRADES, SAMPLE_LINES, CATEGORIES } from "./data.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(here, "..", "public");
+// three.js wird direkt aus node_modules ausgeliefert
+const VENDOR_DIRS = {
+  "/vendor/three/": path.resolve(here, "..", "node_modules", "three", "build"),
+  "/vendor/three-addons/": path.resolve(here, "..", "node_modules", "three", "examples", "jsm"),
+};
 const PORT = Number(process.env.PORT) || 3000;
 
 const TYPES = {
@@ -45,8 +50,16 @@ async function readBody(req) {
 }
 
 async function serveStatic(req, res, pathname) {
-  const file = path.resolve(PUBLIC_DIR, "." + (pathname === "/" ? "/index.html" : pathname));
-  if (!file.startsWith(PUBLIC_DIR + path.sep)) {
+  let root = PUBLIC_DIR;
+  let rel = pathname === "/" ? "/index.html" : pathname;
+  for (const [prefix, dir] of Object.entries(VENDOR_DIRS)) {
+    if (pathname.startsWith(prefix)) {
+      root = dir;
+      rel = "/" + pathname.slice(prefix.length);
+    }
+  }
+  const file = path.resolve(root, "." + rel);
+  if (!file.startsWith(root + path.sep)) {
     res.writeHead(403).end();
     return;
   }
@@ -98,6 +111,11 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const room = getRoom(body.code);
       if (!room) return sendJson(res, 404, { error: "Raum nicht gefunden." });
+      // Positionsupdates kommen oft; die Spielschleife sendet sie ohnehin mit
+      if (body.action?.type === "pos") {
+        await handleAction(room, body.playerId, body.action);
+        return sendJson(res, 200, { ok: true });
+      }
       const pending = handleAction(room, body.playerId, body.action || {});
       // Sofort senden, damit z. B. „Anrufer tippt …“ ohne Verzögerung erscheint
       broadcast(room);

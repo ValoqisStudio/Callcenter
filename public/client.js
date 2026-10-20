@@ -1,4 +1,4 @@
-"use strict";
+import { createOffice } from "./office3d.js";
 
 // ---------------------------------------------------------------------------
 // Grundlagen
@@ -13,10 +13,14 @@ const BOSS_FACES = ["😡", "😠", "😐", "🙂", "😁"];
 let config = { ai: { mode: "offline" }, upgrades: [], samples: {}, categories: {} };
 let session = null; // { code, playerId }
 let state = null;
+let prevPhase = null;
 let source = null;
 let clockOffset = 0;
 let lastEventId = -1;
 let watchCallId = null;
+let lastCall = null; // letztes eigenes Gespräch, bleibt nach dem Auflegen lesbar
+let office = null;
+let seated = false;
 
 function store(key, value) {
   try {
@@ -66,12 +70,13 @@ function beep(freq, duration = 0.12, type = "sine", volume = 0.07) {
   }
 }
 const sfx = {
-  ring: () => { beep(880, 0.15); setTimeout(() => beep(880, 0.15), 200); },
+  ring: () => [0, 200, 600, 800].forEach((t) => setTimeout(() => beep(880, 0.15), t)),
+  pickup: () => beep(420, 0.08, "square", 0.04),
   bad: () => beep(180, 0.25, "square", 0.05),
   cash: () => [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => beep(f, 0.12, "triangle"), i * 80)),
   boss: () => { beep(300, 0.3, "square", 0.04); setTimeout(() => beep(250, 0.3, "square", 0.04), 300); },
   virus: () => { for (let i = 0; i < 10; i++) setTimeout(() => beep(100 + Math.random() * 800, 0.08, "sawtooth", 0.05), i * 60); },
-  click: () => beep(600 + Math.random() * 200, 0.04),
+  coffee: () => { for (let i = 0; i < 6; i++) setTimeout(() => beep(150 + Math.random() * 60, 0.1, "sawtooth", 0.02), i * 90); },
 };
 
 // ---------------------------------------------------------------------------
@@ -89,31 +94,33 @@ if ("speechSynthesis" in window) {
   speechSynthesis.onvoiceschanged = loadVoices;
 }
 
-const FEMALE_HINT = /(anna|katja|hedda|petra|marlene|vicki|female|frau|helena|sabine|amala|conrad?a|elke|seraphina|katharina|louisa|gisela|ingrid)/i;
+const FEMALE_HINT = /(anna|katja|hedda|petra|marlene|vicki|female|frau|helena|sabine|amala|elke|seraphina|katharina|louisa|gisela|ingrid)/i;
 function voiceFor(call) {
   if (!germanVoices.length) return null;
   const female = germanVoices.filter((v) => FEMALE_HINT.test(v.name));
   const male = germanVoices.filter((v) => !FEMALE_HINT.test(v.name));
   const pool = call.gender === "f" ? (female.length ? female : germanVoices) : (male.length ? male : germanVoices);
-  // Gleicher Anrufer, gleiche Stimme
   const hash = [...call.id].reduce((h, ch) => h + ch.charCodeAt(0), 0);
   return pool[hash % pool.length];
 }
+
+const CODE_RE = /\b[A-Z0-9]{4}(?:-[A-Z0-9]{4})+\b/g;
 
 function speak(call, text) {
   if (!voiceOn || !("speechSynthesis" in window)) return;
   const clean = text
     .replace(/\*[^*]*\*/g, " ")
     .replace(/[👋💸🦠]/gu, "")
-    .replace(/\d{3,}/g, (d) => d.split("").join(" ")) // Kartennummern Ziffer für Ziffer
+    // Codes und Kartennummern Zeichen für Zeichen vorlesen
+    .replace(CODE_RE, (code) => code.split("-").map((g) => g.split("").join(" ")).join(", Strich, "))
+    .replace(/\d{3,}/g, (d) => d.split("").join(" "))
     .trim();
   if (!clean) return;
   const u = new SpeechSynthesisUtterance(clean);
   u.lang = "de-DE";
   const v = voiceFor(call);
   if (v) u.voice = v;
-  const agePitch = call.age > 80 ? -0.15 : 0;
-  u.pitch = clamp((call.gender === "f" ? 1.15 : 0.8) + agePitch, 0.1, 2);
+  u.pitch = clamp((call.gender === "f" ? 1.15 : 0.8) + (call.age > 80 ? -0.15 : 0), 0.1, 2);
   u.rate = call.age > 80 ? 0.88 : 0.98;
   speechSynthesis.speak(u);
 }
@@ -125,7 +132,6 @@ function stopSpeaking() {
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognizer = null;
 let listening = false;
-let heard = "";
 
 function startListening() {
   if (!Recognition || listening) return;
@@ -136,16 +142,10 @@ function startListening() {
   recognizer.lang = "de-DE";
   recognizer.interimResults = true;
   recognizer.continuous = true;
-  heard = "";
   recognizer.onresult = (e) => {
-    let finalText = "";
-    let interim = "";
-    for (let i = 0; i < e.results.length; i++) {
-      if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
-      else interim += e.results[i][0].transcript;
-    }
-    heard = (finalText + " " + interim).trim();
-    $("in-say").value = heard;
+    let text = "";
+    for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;
+    $("in-say").value = text.trim();
   };
   recognizer.onerror = (e) => {
     if (e.error === "not-allowed") toast("🎤 Mikrofon-Zugriff wurde verweigert.", { bad: true });
@@ -179,11 +179,11 @@ async function api(path, body) {
   return data;
 }
 
-async function act(action) {
+async function act(action, { quiet = false } = {}) {
   try {
     await api("/api/action", { code: session.code, playerId: session.playerId, action });
   } catch (err) {
-    toast(err.message, { bad: true });
+    if (!quiet) toast(err.message, { bad: true });
   }
 }
 
@@ -198,8 +198,8 @@ function connect() {
   };
   source.onerror = () => {
     // EventSource verbindet sich selbst neu. Ist der Raum weg, zurück ins Menü.
-    setTimeout(async () => {
-      if (source.readyState !== EventSource.CLOSED) return;
+    setTimeout(() => {
+      if (!source || source.readyState !== EventSource.CLOSED) return;
       store("session", null);
       session = null;
       showScreen("screen-menu");
@@ -230,8 +230,7 @@ function playerName() {
 // Zustand auswerten
 // ---------------------------------------------------------------------------
 
-const me = () => state && state.players.find((p) => p.id === session.playerId);
-const serverNow = () => Date.now() + clockOffset;
+const me = () => state && session && state.players.find((p) => p.id === session.playerId);
 
 function myCall() {
   if (!state) return null;
@@ -242,7 +241,7 @@ function myCall() {
 }
 
 function canTalk(call) {
-  return (call.stage === "talk" || call.stage === "cashier") && !call.busy;
+  return (call.stage === "talk" || call.stage === "away") && !call.busy;
 }
 
 function handleEvents() {
@@ -254,7 +253,6 @@ function handleEvents() {
   for (const ev of events) {
     if (ev.id <= lastEventId) continue;
     lastEventId = ev.id;
-    const mine = !ev.target || ev.target === session.playerId;
     switch (ev.type) {
       case "ring": sfx.ring(); break;
       case "boss": sfx.boss(); break;
@@ -269,12 +267,69 @@ function handleEvents() {
         }
         break;
       default:
-        if (ev.text && (mine || !ev.target)) {
+        if (ev.text && (!ev.target || ev.target === session.playerId)) {
           if (ev.bad) sfx.bad();
           toast(ev.text, { bad: ev.bad, mine: ev.target === session.playerId });
         }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Sitzen & Laufen
+// ---------------------------------------------------------------------------
+
+function ensureOffice() {
+  if (office) return;
+  office = createOffice($("view3d"), {
+    canMove: () => state && state.phase === "day" && !seated,
+    onSit: () => sitDown(),
+    onCoffee: () => { sfx.coffee(); toast("☕ Ahh, frischer Kaffee. Weiter geht's!"); },
+    onHint: (text) => toast(text),
+    onFocus: (text) => {
+      $("focus-hint").textContent = text || "";
+      $("focus-hint").classList.toggle("hidden", !text);
+    },
+    onLockChange: () => renderOverlays(),
+  });
+  // Position regelmäßig an die anderen melden
+  let lastPose = "";
+  setInterval(() => {
+    if (!state || !office || seated) return;
+    const p = office.pose();
+    const key = `${p.x.toFixed(2)}|${p.z.toFixed(2)}|${p.ry.toFixed(2)}`;
+    if (key === lastPose) return;
+    lastPose = key;
+    act({ type: "pos", ...p }, { quiet: true });
+  }, 150);
+}
+
+function sitDown() {
+  const p = me();
+  if (!p || seated || state.phase !== "day") return;
+  seated = true;
+  office.sitAt(p.desk);
+  act({ type: "sit", seated: true });
+  renderOverlays();
+  setTimeout(() => $("in-say").focus(), 400);
+}
+
+function standUp() {
+  if (!seated) return;
+  stopListening();
+  stopSpeaking();
+  seated = false;
+  office.stand();
+  act({ type: "sit", seated: false });
+  document.activeElement?.blur();
+  renderOverlays();
+}
+
+function goToDesk() {
+  const p = me();
+  if (!p || state.phase !== "day") return;
+  office.placeNear(p.desk);
+  sitDown();
 }
 
 // ---------------------------------------------------------------------------
@@ -289,22 +344,44 @@ function render() {
     showScreen("screen-lobby");
   } else {
     showScreen("screen-game");
+    ensureOffice();
+    office.update(state, session.playerId);
+    if (phase === "day" && prevPhase !== "day") {
+      // Neuer Arbeitstag: vor den eigenen Platz stellen
+      seated = false;
+      lastCall = null;
+      $("notes").value = "";
+      office.placeNear(me().desk);
+    }
+    if (phase !== "day" && seated) {
+      seated = false;
+      office.stand();
+    }
     renderHud();
-    renderDesks();
-    renderQueue();
-    renderDesk();
+    if (seated) renderPc();
   }
+  renderOverlays();
   $("review").classList.toggle("hidden", phase !== "review");
   $("gameover").classList.toggle("hidden", phase !== "gameover");
   if (phase === "review") renderReview();
   if (phase === "gameover") renderGameOver();
-  if (phase !== "day") closeRemote(false);
+  prevPhase = phase;
+}
+
+function renderOverlays() {
+  if (!state || state.phase === "lobby") return;
+  const day = state.phase === "day";
+  const locked = office && office.isLocked();
+  $("pc").classList.toggle("hidden", !(day && seated));
+  $("click-to-play").classList.toggle("hidden", !day || seated || locked);
+  $("crosshair").classList.toggle("hidden", !locked);
+  if (!locked) $("focus-hint").classList.add("hidden");
 }
 
 function renderLobby() {
   $("lobby-code").textContent = state.code;
   $("lobby-players").innerHTML = state.players
-    .map((p) => `<li style="border-color:${p.color}">${p.avatar} ${escapeHtml(p.name)}${p.id === state.hostId ? " 👑" : ""}${p.id === session.playerId ? " (du)" : ""}</li>`)
+    .map((p) => `<li style="border-color:${p.color}">${escapeHtml(p.name)} · Platz ${p.desk + 1}${p.id === state.hostId ? " 👑" : ""}${p.id === session.playerId ? " (du)" : ""}</li>`)
     .join("");
   $("lobby-ai").textContent = aiText();
 }
@@ -315,10 +392,14 @@ function aiText() {
     : "🤖 Offline-KI aktiv. Für echte KI-Gespräche den Server mit ANTHROPIC_API_KEY starten.";
 }
 
+function clockText() {
+  const minutes = Math.floor(clamp(state.elapsed / state.dayLength, 0, 1) * 8 * 60);
+  return `${String(9 + Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
 function renderHud() {
   $("hud-day").textContent = state.day;
-  const minutes = Math.floor(clamp(state.elapsed / state.dayLength, 0, 1) * 8 * 60);
-  $("hud-clock").textContent = `${String(9 + Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  $("hud-clock").textContent = clockText();
   $("hud-quota").textContent = `${euro(state.earned)} / ${euro(state.quota)}`;
   const bar = $("hud-quota-bar");
   bar.style.width = `${clamp((state.earned / state.quota) * 100, 0, 100)}%`;
@@ -328,29 +409,17 @@ function renderHud() {
   $("hud-bank").textContent = euro(state.bank);
   $("hud-code").textContent = state.code;
   $("btn-voice").textContent = voiceOn ? "🔊" : "🔇";
-
-  const bossHere = state.phase === "day" && state.bossVisit > 0;
-  $("boss-alert").classList.toggle("hidden", !bossHere);
-  const walker = $("boss-walker");
-  if (bossHere && walker.classList.contains("hidden")) {
-    walker.classList.remove("hidden");
-    walker.style.animation = "none";
-    void walker.offsetWidth; // Animation neu starten
-    walker.style.animation = "";
-  } else if (!bossHere) {
-    walker.classList.add("hidden");
-  }
+  const ringing = state.phase === "day" ? state.queue.length : 0;
+  $("hud-ringing").classList.toggle("hidden", !ringing || !!(me() && me().callId));
+  $("hud-ring-count").textContent = ringing;
+  $("boss-alert").classList.toggle("hidden", !(state.phase === "day" && state.bossVisit > 0));
 }
 
-function renderDesks() {
-  $("desks").innerHTML = state.players.map((p) => {
-    const call = p.callId && state.calls.find((c) => c.id === p.callId);
-    const status = call ? `📞 ${escapeHtml(call.name)}` : "💤 frei";
-    return `<div class="desk-tile${call ? " talking" : ""}${p.online ? "" : " offline"}" style="border-color:${p.color}">
-      <span class="emoji">${p.avatar}</span>
-      <div><b>${escapeHtml(p.name)}${p.id === session.playerId ? " (du)" : ""}</b><br><span class="hint">${status}</span></div>
-    </div>`;
-  }).join("");
+function renderPc() {
+  $("pc-desk").textContent = me().desk + 1;
+  $("pc-clock").textContent = `${clockText()} Uhr`;
+  renderQueue();
+  renderCall();
 }
 
 function renderQueue() {
@@ -366,14 +435,17 @@ function renderQueue() {
       const li = document.createElement("li");
       li.className = "call-item";
       li.dataset.id = c.id;
-      li.innerHTML = `<span>📳</span><div class="who">${escapeHtml(c.city)}<div class="wait"></div></div>`;
+      li.innerHTML = `<span>📳</span><div class="who">Anruf aus ${escapeHtml(c.city)}<div class="wait"></div></div>`;
       const btn = document.createElement("button");
-      btn.textContent = "Annehmen";
+      btn.textContent = "Abnehmen";
       btn.disabled = busy;
       btn.onclick = () => {
         btn.disabled = true;
         watchCallId = null;
+        lastCall = null;
+        sfx.pickup();
         act({ type: "answer", callId: c.id });
+        setTimeout(() => $("in-say").focus(), 200);
       };
       li.appendChild(btn);
       ul.appendChild(li);
@@ -392,7 +464,7 @@ function renderQueue() {
     const li = document.createElement("li");
     li.style.borderColor = owner ? owner.color : "";
     li.className = watchCallId === c.id ? "watching" : "";
-    li.innerHTML = `${owner ? escapeHtml(owner.name) : "?"} ↔ ${escapeHtml(c.name)} · ${c.trust}% <span class="hint">(mithören)</span>`;
+    li.innerHTML = `${owner ? escapeHtml(owner.name) : "?"} ↔ ${escapeHtml(c.name)} <span class="hint">(mithören)</span>`;
     li.onclick = () => { watchCallId = watchCallId === c.id ? null : c.id; render(); };
     $("team-calls").appendChild(li);
   }
@@ -401,30 +473,34 @@ function renderQueue() {
 
 let renderedCallId = null;
 let renderedHistory = 0;
-let renderedStageKey = "";
 let spokenUpTo = 0;
 
-function renderDesk() {
+function renderCall() {
   let call = myCall();
   let readonly = false;
-  if (!call && watchCallId) {
+  if (call) {
+    lastCall = call;
+  } else if (watchCallId) {
     call = state.calls.find((c) => c.id === watchCallId) || null;
     if (!call) watchCallId = null;
     readonly = !!call;
   }
+  // Nach dem Auflegen bleibt das letzte Gespräch lesbar (z. B. um den Code nachzulesen)
+  if (!call && lastCall) call = { ...lastCall, stage: "done", busy: false };
 
-  $("desk-idle").classList.toggle("hidden", !!call);
-  $("desk-call").classList.toggle("hidden", !call);
-  $("desk-call").classList.toggle("readonly", readonly);
+  $("caller-box").classList.toggle("hidden", !call);
+  $("pc").classList.toggle("readonly", readonly || !call || call.stage === "done");
   if (!call) {
     renderedCallId = null;
+    $("dialog").innerHTML = `<p class="hint dialog-empty">Kein Gespräch. Nimm einen Anruf an.</p>`;
+    $("talk-row").classList.add("hidden");
+    $("cheats").classList.add("hidden");
     return;
   }
 
   if (call.id !== renderedCallId) {
     renderedCallId = call.id;
     renderedHistory = 0;
-    renderedStageKey = "";
     spokenUpTo = readonly ? call.history.length : 0;
     $("dialog").innerHTML = "";
     $("in-say").value = "";
@@ -435,6 +511,8 @@ function renderDesk() {
   $("caller-name").textContent = call.name;
   $("caller-meta").textContent = `${call.age} Jahre · ${call.city}`;
   const tags = [];
+  if (call.stage === "away") tags.push(`<span>🚶 unterwegs</span>`);
+  if (call.stage === "done") tags.push(`<span>aufgelegt</span>`);
   if (call.skeptical) tags.push(`<span>misstrauisch</span>`);
   if (call.weakness) tags.push(`<span class="weak">Schwäche: ${config.categories[call.weakness]}</span>`);
   if (call.baiter) tags.push(`<span class="baiter">⚠️ Scambaiter!</span>`);
@@ -459,13 +537,16 @@ function renderDesk() {
     const div = document.createElement("div");
     div.className = `msg ${m.role === "player" ? "me" : m.role === "caller" ? "them" : "sys"}`;
     let body = escapeHtml(m.text);
-    // Kartendaten nur vorlesen, nicht anzeigen: Mitschreiben ist Teil des Spiels
+    // Codes und Kartendaten nur vorlesen, nicht anzeigen: Mitschreiben ist Teil des Spiels
     if (m.secret && voiceOn && germanVoices.length && !readonly) {
-      body = body.replace(/\d[\d ,/]*\d/g, (d) => `<span class="secret" title="Hör genau hin!">${d.replace(/\d/g, "•")}</span>`)
+      body = body
+        .replace(CODE_RE, (c) => `<span class="secret" title="Hör genau hin!">${c.replace(/[A-Z0-9]/g, "•")}</span>`)
+        .replace(/\d[\d ,/]*\d/g, (x) => `<span class="secret" title="Hör genau hin!">${x.replace(/\d/g, "•")}</span>`)
         + ` <button class="replay" title="Nochmal vorlesen">🔁</button>`;
     }
     div.innerHTML = (m.by && m.role === "player" ? `<span class="by">${escapeHtml(m.by)}</span>` : "") + body;
-    div.querySelector(".replay")?.addEventListener("click", () => speak(call, m.text));
+    const snapshot = call;
+    div.querySelector(".replay")?.addEventListener("click", () => speak(snapshot, m.text));
     dialog.appendChild(div);
     if (m.role === "caller" && i >= spokenUpTo) speak(call, m.text);
   }
@@ -480,82 +561,37 @@ function renderDesk() {
   dialog.scrollTop = dialog.scrollHeight;
 
   const talk = canTalk(call) && !readonly;
+  $("talk-row").classList.toggle("hidden", call.stage === "done");
+  $("cheats").classList.toggle("hidden", call.stage !== "talk");
   $("in-say").disabled = !talk;
   $("btn-say").disabled = !talk;
   $("btn-mic").disabled = !talk || !Recognition;
   $("btn-mic").title = Recognition ? "Sprechen (Taste V gedrückt halten)" : "Spracheingabe wird von diesem Browser nicht unterstützt (Chrome/Edge nutzen)";
-  $("in-say").placeholder = call.stage === "cashier"
-    ? "Was soll der Anrufer der Kassiererin sagen?"
+  $("in-say").placeholder = call.stage === "away"
+    ? "Der Anrufer ist unterwegs … frag gleich, ob er wieder da ist."
     : "Was sagst du? (Enter zum Senden)";
-  $("btn-hangup").classList.toggle("hidden", call.stage === "done");
-  $("talk-row").classList.toggle("hidden", !(call.stage === "talk" || call.stage === "cashier"));
-  $("cheats").classList.toggle("hidden", call.stage !== "talk");
-
-  renderStage(call, readonly);
-}
-
-function renderStage(call, readonly) {
-  const panel = $("stage-panel");
-  const key = `${call.id}:${call.stage}:${readonly}`;
-  if (key !== renderedStageKey) {
-    renderedStageKey = key;
-    panel.innerHTML = "";
-    if (call.stage === "choose") {
-      panel.innerHTML = `<p><b>Vertrauen gewonnen!</b> Wie soll bezahlt werden?</p>
-        <div class="pay-options">
-          <button id="pay-card"><b>💳 Kreditkarte</b><small>Sofort und volle Summe. Schreib die Nummer mit, die vorgelesen wird. Bis Feierabend kann die Bank zurückbuchen.</small></button>
-          <button id="pay-gift"><b>🎁 Gutscheinkarten</b><small>Sicher, aber 90 % Wert. Der Anrufer muss erst zum Kiosk, und die Kassiererin wird misstrauisch.</small></button>
-        </div>`;
-      $("pay-card").onclick = () => act({ type: "pay", method: "card" });
-      $("pay-gift").onclick = () => act({ type: "pay", method: "giftcard" });
-    } else if (call.stage === "card") {
-      panel.innerHTML = `<p>💳 <b>Kartenterminal</b>: Tipp die vorgelesenen Daten ein. Noch <span id="card-countdown" class="countdown"></span></p>
-        <form id="terminal" class="terminal">
-          <label>Kartennummer<input id="card-number" inputmode="numeric" placeholder="0000 0000 0000 0000" autocomplete="off"></label>
-          <label>Gültig bis<input id="card-expiry" placeholder="MM/JJ" autocomplete="off"></label>
-          <label>Prüfnummer<input id="card-cvc" inputmode="numeric" placeholder="123" autocomplete="off"></label>
-          <button type="submit">Abbuchen</button>
-        </form>`;
-      $("terminal").onsubmit = (e) => {
-        e.preventDefault();
-        act({ type: "card", number: $("card-number").value, expiry: $("card-expiry").value, cvc: $("card-cvc").value });
-      };
-      if (!readonly) setTimeout(() => $("card-number")?.focus(), 50);
-    } else if (call.stage === "store") {
-      panel.innerHTML = `<p>🏪 ${escapeHtml(call.name.split(" ")[0])} ist auf dem Weg zum Kiosk … Bleib dran!</p><div class="progress"><div id="store-progress"></div></div>`;
-    } else if (call.stage === "cashier") {
-      panel.innerHTML = `<p>🧾 <b>Die Kassiererin wird misstrauisch!</b> Erklär dem Anrufer, was er sagen soll.</p>`;
-    } else if (call.stage === "codes") {
-      panel.innerHTML = `<p>🎁 Der Anrufer hat die Karten. Übernimm seinen Bildschirm und löse die Codes ein!</p><button id="btn-remote" class="big">🖱️ Fernzugriff starten</button>`;
-      $("btn-remote").onclick = () => openRemote(call);
-    } else if (call.stage === "done") {
-      panel.innerHTML = `<p class="hint">Gespräch beendet.</p>`;
-    }
-  }
-
-  if (call.stage === "card" && $("card-countdown")) {
-    $("card-countdown").textContent = `${Math.max(0, (call.deadline - serverNow()) / 1000).toFixed(0)} s`;
-  }
-  if (call.stage === "store" && $("store-progress")) {
-    const total = (state.upgrades.includes("kiosk") ? 6 : 11);
-    $("store-progress").style.width = `${clamp(100 - (call.stageTimer / total) * 100, 0, 100)}%`;
-  }
 }
 
 function renderCheats() {
   const box = $("cheats");
   box.innerHTML = "";
-  for (const [cat, label] of Object.entries(config.categories)) {
+  const add = (label, cls, lines) => {
     const btn = document.createElement("button");
-    btn.className = `cat-${cat}`;
-    btn.textContent = `📝 ${label}`;
+    if (cls) btn.className = cls;
+    btn.textContent = label;
     btn.title = "Spickzettel: fügt einen Beispielsatz ein";
     btn.onclick = () => {
-      $("in-say").value = pick(config.samples[cat]);
+      $("in-say").value = pick(lines);
       $("in-say").focus();
     };
     box.appendChild(btn);
-  }
+  };
+  for (const [cat, label] of Object.entries(config.categories)) add(`📝 ${label}`, `cat-${cat}`, config.samples[cat] || [""]);
+  add("🎁 Gutschein verlangen", "ask-gift", [
+    "Damit ich Ihnen helfen kann, brauche ich eine Google-Play-Gutscheinkarte. Gehen Sie bitte schnell zum Kiosk.",
+    "Holen Sie bitte eine Gutscheinkarte von der Tankstelle, damit bezahlen wir die Reparatur.",
+  ]);
+  add("💳 Karte verlangen", "ask-card", ["Zur Bestätigung lesen Sie mir bitte Ihre Kreditkartennummer, das Ablaufdatum und die Prüfnummer vor."]);
 }
 
 function renderReview() {
@@ -566,8 +602,9 @@ function renderReview() {
   $("review-body").innerHTML = `
     <div class="stat-line"><span>Eingenommen</span><b>${euro(r.earned)} / ${euro(r.quota)}</b></div>
     ${r.chargeback ? `<div class="stat-line"><span>Rückbuchungen der Bank (${r.chargebackCount}×)</span><b class="bad">−${euro(r.chargeback)}</b></div>` : ""}
-    <div class="stat-line"><span>Erfolgreiche Anrufe</span><b>${s.scammed}</b></div>
-    <div class="stat-line"><span>Kreditkarte / Gutscheine gewählt</span><b>${s.card} / ${s.giftcard}</b></div>
+    ${r.expired ? `<div class="stat-line"><span>Nicht eingelöste Codes/Karten</span><b class="bad">${r.expired}</b></div>` : ""}
+    <div class="stat-line"><span>Erfolgreiche Abbuchungen</span><b>${s.scammed}</b></div>
+    <div class="stat-line"><span>Gutschein-Gänge / Karten vorgelesen</span><b>${s.giftcard} / ${s.card}</b></div>
     <div class="stat-line"><span>Verpasste Anrufe</span><b>${s.missed}</b></div>
     <div class="stat-line"><span>Scambaiter entlarvt</span><b>${s.baitersCaught}</b></div>
     <div class="stat-line"><span>Viren eingefangen</span><b>${s.viruses}</b></div>
@@ -596,81 +633,10 @@ function renderReview() {
 }
 
 function renderGameOver() {
+  const days = state.review ? state.review.day : state.day;
   $("gameover-text").innerHTML =
-    `Ihr habt ${state.review ? state.review.day : state.day} ${state.day === 1 ? "Tag" : "Tage"} überlebt und insgesamt ${euro(state.totalEarned)} eingenommen.<br><br>` +
+    `Ihr habt ${days} ${days === 1 ? "Tag" : "Tage"} überlebt und insgesamt ${euro(state.totalEarned)} eingenommen.<br><br>` +
     "Die Polizei interessiert sich übrigens auch schon für den Laden …";
-}
-
-// ---------------------------------------------------------------------------
-// Fernzugriff-Minispiel (Gutscheine einlösen)
-// ---------------------------------------------------------------------------
-
-const POPUP_TEXTS = [
-  "Sie haben gewonnen! (wirklich nicht)",
-  "Update verfügbar: Version 0.0.0.1",
-  "Möchten Sie Cookies? 🍪",
-  "Druckerfehler: Drucker ist traurig",
-  "Wetter-Widget: Regen in Ordner C:",
-  "Toolbar 'SuperSuche 3000' installieren?",
-  "Ihr Solitär vermisst Sie.",
-  "Bitte bewerten Sie Windows 98!",
-  "Enkel-Foto-Diashow wird geladen …",
-  "Kürbis-Forum: 47 neue Beiträge",
-];
-
-let remoteTimer = null;
-let remoteCallId = null;
-
-function openRemote(call) {
-  remoteCallId = call.id;
-  const desk = $("remote-desktop");
-  desk.querySelectorAll(".popup").forEach((p) => p.remove());
-  $("remote-victim").textContent = call.name;
-  $("remote").classList.remove("hidden");
-
-  const w = desk.clientWidth;
-  const h = desk.clientHeight;
-  const target = $("remote-target");
-  const tx = 20 + Math.random() * Math.max(1, w - 240);
-  const ty = 20 + Math.random() * (h - 70);
-  target.style.left = `${tx}px`;
-  target.style.top = `${ty}px`;
-  target.disabled = false;
-
-  const count = 4 + Math.min(state.day, 6) + (call.skeptical ? 1 : 0);
-  for (let i = 0; i < count; i++) {
-    const p = document.createElement("div");
-    p.className = "popup";
-    const over = i < 3; // ein paar liegen garantiert über dem Knopf
-    const x = over ? tx + (Math.random() * 60 - 40) : Math.random() * (w - 190);
-    const y = over ? ty + (Math.random() * 50 - 40) : Math.random() * (h - 90);
-    p.style.left = `${clamp(x, 0, w - 190)}px`;
-    p.style.top = `${clamp(y, 0, h - 90)}px`;
-    p.innerHTML = `<div class="bar-top"><span>⚠️ Hinweis</span><button>✕</button></div><p>${pick(POPUP_TEXTS)}</p>`;
-    p.querySelector("button").onclick = (e) => {
-      e.stopPropagation();
-      p.remove();
-      sfx.click();
-    };
-    desk.appendChild(p);
-  }
-
-  clearInterval(remoteTimer);
-  remoteTimer = setInterval(() => {
-    const left = (call.deadline - serverNow()) / 1000;
-    $("remote-timer").textContent = `${Math.max(0, left).toFixed(1)}s`;
-    if (left <= 0) closeRemote(true, false);
-  }, 100);
-  target.onclick = () => closeRemote(true, true);
-}
-
-function closeRemote(report, success) {
-  if (!remoteCallId) return;
-  clearInterval(remoteTimer);
-  $("remote").classList.add("hidden");
-  const id = remoteCallId;
-  remoteCallId = null;
-  if (report && myCall() && myCall().id === id) act({ type: "remote", success });
 }
 
 // ---------------------------------------------------------------------------
@@ -697,6 +663,9 @@ $("btn-next-day").onclick = () => act({ type: "start" });
 $("btn-restart").onclick = () => act({ type: "restart" });
 $("btn-hangup").onclick = () => { stopSpeaking(); act({ type: "hangup" }); };
 $("btn-say").onclick = sendSay;
+$("btn-stand").onclick = standUp;
+$("btn-goto-desk").onclick = goToDesk;
+$("click-to-play").onclick = () => office && office.lock();
 $("in-say").addEventListener("keydown", (e) => { if (e.key === "Enter") sendSay(); });
 $("btn-voice").onclick = () => {
   voiceOn = !voiceOn;
@@ -705,11 +674,34 @@ $("btn-voice").onclick = () => {
   render();
 };
 
-// Mikrofon: Klick schaltet um, Taste V gedrückt halten = Push-to-Talk
-$("btn-mic").onclick = () => (listening ? stopListening() : startListening());
+$("redeem-form").onsubmit = (e) => {
+  e.preventDefault();
+  const code = $("in-gift").value.trim();
+  if (!code) return;
+  act({ type: "redeem", code });
+  $("in-gift").value = "";
+};
+$("card-form").onsubmit = (e) => {
+  e.preventDefault();
+  act({ type: "card", number: $("card-number").value, expiry: $("card-expiry").value, cvc: $("card-cvc").value });
+};
+
+// Tastatur: Esc = aufstehen, Tab = direkt an den Platz, V gedrückt halten = sprechen
 const typingTarget = (el) => el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA");
+$("btn-mic").onclick = () => (listening ? stopListening() : startListening());
 document.addEventListener("keydown", (e) => {
-  if (e.key.toLowerCase() === "v" && !e.repeat && !typingTarget(document.activeElement)) {
+  if (!state || state.phase !== "day") return;
+  if (e.key === "Escape" && seated) {
+    if (typingTarget(document.activeElement)) document.activeElement.blur();
+    else standUp();
+    return;
+  }
+  if (e.key === "Tab" && !seated && !typingTarget(document.activeElement)) {
+    e.preventDefault();
+    goToDesk();
+    return;
+  }
+  if (e.key.toLowerCase() === "v" && seated && !e.repeat && !typingTarget(document.activeElement)) {
     e.preventDefault();
     startListening();
   }
@@ -717,6 +709,9 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("keyup", (e) => {
   if (e.key.toLowerCase() === "v" && listening) stopListening();
 });
+
+// Lesezugriff für Debugging und automatisierte Tests
+window.callcenter = { state: () => state, session: () => session, myCall };
 
 // ---------------------------------------------------------------------------
 // Start
