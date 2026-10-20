@@ -1,8 +1,9 @@
-// KI für die Anrufer. Mit ANTHROPIC_API_KEY spricht Claude die Anrufer,
-// ohne Key (oder bei Fehlern) übernimmt eine regelbasierte Offline-KI.
+// KI für die Anrufer. Je nach vorhandenem Key spielt Claude oder Google Gemini die
+// Anrufer; ohne Key (oder bei Fehlern) übernimmt eine regelbasierte Offline-KI.
 
 import Anthropic from "@anthropic-ai/sdk";
 import { CATEGORIES, WEAKNESS_TEXT, RESIST_TEXT } from "./data.js";
+import { geminiAvailable, geminiModel, geminiTurn, initGemini } from "./gemini.js";
 
 const MODEL = process.env.CALLCENTER_MODEL || "claude-opus-5-5";
 const EFFORT = process.env.CALLCENTER_EFFORT || "low";
@@ -11,7 +12,7 @@ const EFFORT = process.env.CALLCENTER_EFFORT || "low";
 export const COMPLY_TRUST = 70;
 
 let mode = process.env.CALLCENTER_AI
-  || (process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN ? "claude" : "offline");
+  || (process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN ? "claude" : geminiAvailable() ? "gemini" : "offline");
 let client = null;
 if (mode === "claude") {
   try {
@@ -21,9 +22,16 @@ if (mode === "claude") {
     mode = "offline";
   }
 }
+if (mode === "gemini" && !geminiAvailable()) mode = "offline";
+
+export async function initAi() {
+  if (mode === "gemini") await initGemini();
+}
 
 export function aiStatus() {
-  return mode === "claude" ? { mode, model: MODEL } : { mode };
+  if (mode === "claude") return { mode, model: MODEL };
+  if (mode === "gemini") return { mode, model: geminiModel() };
+  return { mode };
 }
 
 const SCHEMA = {
@@ -94,6 +102,14 @@ Antworte auf den letzten Satz des Mitarbeiters.`;
 }
 
 export async function callerTurn(caller) {
+  if (mode === "gemini") {
+    try {
+      return normalize(await geminiTurn(systemPrompt(caller), turnPrompt(caller)));
+    } catch (err) {
+      console.warn("[ai] Gemini-Fehler, Offline-Antwort für diesen Zug:", err.message);
+      return offlineTurn(caller);
+    }
+  }
   if (mode === "claude" && client) {
     try {
       return await claudeTurn(caller);
@@ -124,7 +140,11 @@ async function claudeTurn(caller) {
     throw new Error(`stop_reason ${response.stop_reason}`);
   }
   const text = response.content.filter((b) => b.type === "text").map((b) => b.text).join("");
-  const out = JSON.parse(text);
+  return normalize(JSON.parse(text));
+}
+
+// Antwort der KI in die Spielwerte übersetzen und begrenzen
+function normalize(out) {
   return {
     reply: String(out.reply || "…").slice(0, 400),
     trustDelta: Math.max(-30, Math.min(35, Math.round(Number(out.trust_delta) || 0))),

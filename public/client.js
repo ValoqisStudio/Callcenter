@@ -106,8 +106,59 @@ function voiceFor(call) {
 
 const CODE_RE = /\b[A-Z0-9]{4}(?:-[A-Z0-9]{4})+\b/g;
 
-function speak(call, text) {
-  if (!voiceOn || !("speechSynthesis" in window)) return;
+// Echte Stimmen kommen vom Server (ElevenLabs); klappt das nicht, liest der Browser vor
+let ttsRetryAt = 0;
+const audioQueue = [];
+let currentAudio = null;
+
+function speak(call, text, index) {
+  if (!voiceOn) return;
+  if (config.tts && index != null && Date.now() > ttsRetryAt && session) {
+    const job = { call, text, audio: fetchVoice(call, index) };
+    audioQueue.push(job);
+    if (!currentAudio) playNext();
+    return;
+  }
+  browserSpeak(call, text);
+}
+
+async function fetchVoice(call, index) {
+  const res = await fetch("/api/tts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: session.code, playerId: session.playerId, callId: call.id, index }),
+  });
+  if (res.status === 503) ttsRetryAt = Date.now() + 5 * 60_000;
+  if (!res.ok) throw new Error(`TTS ${res.status}`);
+  return URL.createObjectURL(await res.blob());
+}
+
+async function playNext() {
+  const job = audioQueue.shift();
+  if (!job) {
+    currentAudio = null;
+    return;
+  }
+  currentAudio = job;
+  try {
+    const url = await job.audio;
+    if (currentAudio !== job) return; // inzwischen abgebrochen
+    const audio = new Audio(url);
+    job.el = audio;
+    await new Promise((resolve) => {
+      audio.onended = resolve;
+      audio.onerror = resolve;
+      audio.play().catch(resolve);
+    });
+    URL.revokeObjectURL(url);
+  } catch {
+    if (currentAudio === job) browserSpeak(job.call, job.text);
+  }
+  if (currentAudio === job) playNext();
+}
+
+function browserSpeak(call, text) {
+  if (!("speechSynthesis" in window)) return;
   const clean = text
     .replace(/\*[^*]*\*/g, " ")
     .replace(/[👋💸🦠]/gu, "")
@@ -126,6 +177,9 @@ function speak(call, text) {
 }
 
 function stopSpeaking() {
+  audioQueue.length = 0;
+  if (currentAudio && currentAudio.el) currentAudio.el.pause();
+  currentAudio = null;
   if ("speechSynthesis" in window) speechSynthesis.cancel();
 }
 
@@ -387,9 +441,10 @@ function renderLobby() {
 }
 
 function aiText() {
-  return config.ai.mode === "claude"
-    ? `🤖 Anrufer werden von Claude gespielt (${config.ai.model}).`
-    : "🤖 Offline-KI aktiv. Für echte KI-Gespräche den Server mit ANTHROPIC_API_KEY starten.";
+  const ai = config.ai.mode === "offline"
+    ? "🤖 Offline-KI aktiv (für echte KI-Gespräche GEMINI_API_KEY setzen)."
+    : `🤖 Anrufer werden von ${config.ai.mode === "claude" ? "Claude" : "Gemini"} gespielt (${config.ai.model}).`;
+  return `${ai} ${config.tts ? "🔊 Echte Stimmen (ElevenLabs)." : ""}`.trim();
 }
 
 function clockText() {
@@ -538,7 +593,7 @@ function renderCall() {
     div.className = `msg ${m.role === "player" ? "me" : m.role === "caller" ? "them" : "sys"}`;
     let body = escapeHtml(m.text);
     // Codes und Kartendaten nur vorlesen, nicht anzeigen: Mitschreiben ist Teil des Spiels
-    if (m.secret && voiceOn && germanVoices.length && !readonly) {
+    if (m.secret && voiceOn && (config.tts || germanVoices.length) && !readonly) {
       body = body
         .replace(CODE_RE, (c) => `<span class="secret" title="Hör genau hin!">${c.replace(/[A-Z0-9]/g, "•")}</span>`)
         .replace(/\d[\d ,/]*\d/g, (x) => `<span class="secret" title="Hör genau hin!">${x.replace(/\d/g, "•")}</span>`)
@@ -546,9 +601,10 @@ function renderCall() {
     }
     div.innerHTML = (m.by && m.role === "player" ? `<span class="by">${escapeHtml(m.by)}</span>` : "") + body;
     const snapshot = call;
-    div.querySelector(".replay")?.addEventListener("click", () => speak(snapshot, m.text));
+    const index = i;
+    div.querySelector(".replay")?.addEventListener("click", () => speak(snapshot, m.text, index));
     dialog.appendChild(div);
-    if (m.role === "caller" && i >= spokenUpTo) speak(call, m.text);
+    if (m.role === "caller" && i >= spokenUpTo) speak(call, m.text, i);
   }
   spokenUpTo = Math.max(spokenUpTo, call.history.length);
   renderedHistory = call.history.length;

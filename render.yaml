@@ -1,0 +1,18 @@
+# Render-Blueprint: auf render.com "New" -> "Blueprint" wählen und dieses Repo verbinden.
+# Der Free-Tarif schläft nach 15 Minuten ohne Besucher ein; der erste Aufruf danach dauert etwa eine Minute.
+services:
+  - type: web
+    name: call-center
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/config
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Beim Einrichten fragt Render nach diesen Werten (sync: false = nicht im Repo gespeichert)
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false

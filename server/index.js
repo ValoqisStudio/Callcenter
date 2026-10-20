@@ -5,9 +5,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  createRoom, joinRoom, getRoom, attachClient, handleAction, tick, broadcast, allRooms, dropIdleRooms, GameError,
+  createRoom, joinRoom, getRoom, attachClient, handleAction, tick, broadcast, allRooms, dropIdleRooms, callerLine, GameError,
 } from "./game.js";
-import { aiStatus } from "./ai.js";
+import { initTts, synthesize, ttsAvailable, TtsUnavailable } from "./tts.js";
+import { aiStatus, initAi } from "./ai.js";
 import { UPGRADES, SAMPLE_LINES, CATEGORIES } from "./data.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -78,7 +79,7 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === "GET" && pathname === "/api/config") {
-      return sendJson(res, 200, { ai: aiStatus(), upgrades: UPGRADES, samples: SAMPLE_LINES, categories: CATEGORIES });
+      return sendJson(res, 200, { ai: aiStatus(), tts: ttsAvailable(), upgrades: UPGRADES, samples: SAMPLE_LINES, categories: CATEGORIES });
     }
 
     if (req.method === "POST" && pathname === "/api/rooms") {
@@ -105,6 +106,21 @@ const server = http.createServer(async (req, res) => {
       const detach = attachClient(room, url.searchParams.get("player"), res);
       req.on("close", detach);
       return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/tts") {
+      const body = await readBody(req);
+      const room = getRoom(body.code);
+      if (!room) return sendJson(res, 404, { error: "Raum nicht gefunden." });
+      const { call, text } = callerLine(room, body.playerId, body.callId, body.index);
+      try {
+        const audio = await synthesize(call, text);
+        res.writeHead(200, { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" });
+        return res.end(audio);
+      } catch (err) {
+        if (err instanceof TtsUnavailable) return sendJson(res, 503, { error: err.message });
+        throw err;
+      }
     }
 
     if (req.method === "POST" && pathname === "/api/action") {
@@ -146,10 +162,12 @@ setInterval(() => {
 }, 200);
 setInterval(dropIdleRooms, 60_000);
 
+await Promise.all([initAi(), initTts()]);
 server.listen(PORT, () => {
   const ai = aiStatus();
   console.log(`☎️  Call Center läuft auf http://localhost:${PORT}`);
-  console.log(ai.mode === "claude"
-    ? `🤖 KI-Anrufer: Claude (${ai.model})`
-    : "🤖 KI-Anrufer: Offline-KI (für Claude ANTHROPIC_API_KEY setzen)");
+  console.log(ai.mode === "offline"
+    ? "🤖 KI-Anrufer: Offline-KI (für echte KI GEMINI_API_KEY oder ANTHROPIC_API_KEY setzen)"
+    : `🤖 KI-Anrufer: ${ai.mode === "claude" ? "Claude" : "Gemini"} (${ai.model})`);
+  console.log(ttsAvailable() ? "🔊 Stimmen: ElevenLabs" : "🔊 Stimmen: Browser (für echte Stimmen ELEVENLABS_API_KEY setzen)");
 });

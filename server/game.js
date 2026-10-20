@@ -626,6 +626,17 @@ export function view(room) {
   };
 }
 
+// Für die Sprachausgabe: nur Sätze, die ein Anrufer in diesem Büro wirklich gesagt hat
+export function callerLine(room, playerId, callId, index) {
+  if (!room.players.has(playerId)) throw new GameError("Unbekannter Spieler.");
+  const call = room.calls.get(callId);
+  // Die Ansicht schickt nur die letzten 40 Zeilen, der Index bezieht sich darauf
+  const offset = call ? Math.max(0, call.history.length - 40) : 0;
+  const line = call && call.history[offset + Number(index)];
+  if (!line || line.role !== "caller") throw new GameError("Diese Zeile gibt es nicht.");
+  return { call, text: line.text };
+}
+
 export function broadcast(room) {
   const data = `data: ${JSON.stringify(view(room))}\n\n`;
   for (const p of room.players.values()) for (const res of p.clients) res.write(data);
