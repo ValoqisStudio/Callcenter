@@ -34,20 +34,21 @@ Jeder Anrufer bekommt eine eigene Persönlichkeit (Alter, Macke, Sprechweise, Sc
 
 Ein ganz normaler Arbeitstag im Callcenter, in der Ich-Perspektive:
 
-1. **Ins Büro**: Am PC mit <kbd>WASD</kbd> laufen, Maus zum Umsehen, <kbd>E</kbd> zum Benutzen, <kbd>Shift</kbd> zum Rennen. Am **Handy** links mit dem Joystick laufen, rechts wischen zum Umsehen, ✋ zum Benutzen. Dein Name steht an deinem Platz. 🪑 oben (oder <kbd>Tab</kbd>) springt direkt hin.
-2. **Abnehmen**: Klingelt das Telefon (rote Lampe am Tisch, 📞 im HUD), nimm am PC ab. Der Anrufer meldet sich mit „Hallo?“.
-3. **Vorstellen und überreden**: „Hallo, guten Tag, mein Name ist Johannes, wir haben Viren auf Ihrem Handy festgestellt, bitte zahlen Sie per Gutschein oder Karte …“. **Freisprechen** ist standardmäßig an: einfach reden, nach einer kurzen Pause wird automatisch gesendet, während der Anrufer spricht pausiert das Mikro (🎤 schaltet es aus/an, <kbd>V</kbd> gedrückt halten geht auch). Tippen geht immer. Ein guter Komplett-Spruch kann den Anrufer in einem Zug überzeugen. Jeder Anrufer hat eine Schwäche (Charme, Druck, Autorität, Fachchinesisch) und etwas, das er hasst.
-4. **Gutschein holen lassen**: „Holen Sie bitte eine Gutscheinkarte vom Kiosk.“ Ist das Vertrauen hoch genug, legt er den Hörer weg und geht los. Fragst du zu früh, kommt keine Antwort. Nach ein paar Sekunden: „Sind Sie wieder da?“, und er liest dir den Code vor. Er kann auch mehrmals gehen, solange er Geld hat.
-5. **Oder Kreditkarte**: „Lesen Sie mir bitte Ihre Kreditkartennummer vor.“ Er liest Nummer, Ablaufdatum und Prüfnummer vor. Damit wird abgebucht, was er noch hat, aber bis Feierabend kann die Bank zurückbuchen.
-6. **Einlösen am PC**: Code ins **Gutschein-Portal**, Kartendaten ins **Kartenterminal**. Bei aktiver Sprachausgabe stehen Codes und Nummern nicht im Chat, also gut zuhören und im **Notizblock** mitschreiben (🔁 liest nochmal vor).
+1. **Ins Büro**: Am PC mit <kbd>WASD</kbd> laufen, Maus zum Umsehen, <kbd>E</kbd> zum Benutzen, <kbd>Shift</kbd> zum Rennen. Am **Handy** links mit dem Joystick laufen, rechts wischen, ✋ zum Benutzen. Dein Name steht an deinem Platz; 🪑 oben (oder <kbd>Tab</kbd>) springt direkt hin.
+2. **Telefon**: Am Platz erscheint dein Telefon. Klingelt es, nimmst du mit dem grünen Knopf ab (rot lehnt ab). Während des Gesprächs siehst du oben die **Vertrauensleiste**, die Anrufdauer und den aktuellen Satz des Anrufers als Untertitel.
+3. **Reden**: **Freisprechen** ist an. Einfach sprechen („Hallo, guten Tag, mein Name ist Johannes, wir haben Viren auf Ihrem Computer festgestellt …“), nach einer kurzen Pause wird automatisch gesendet; während der Anrufer spricht, pausiert das Mikro. ⌨️ öffnet ein Textfeld mit Spickzettel, 🔁 wiederholt den letzten Satz, 📴 legt auf.
+4. **Abkassieren**, je nachdem, was du verlangst:
+   - **🖱️ Fernzugriff** (wie im Original): „Installieren Sie bitte FernViewer und lesen Sie mir Ihre ID vor.“ Am PC (<kbd>Q</kbd>) in der App **FernViewer** die ID eingeben, schon siehst du seinen Desktop. Im **Online-Banking** überweist du dir Geld, solange er am Telefon bleibt. Zu gierig? Dann merkt er es vielleicht.
+   - **🎁 Gutschein**: „Holen Sie eine Gutscheinkarte vom Kiosk.“ Er geht los; fragst du zu früh, kommt keine Antwort. Nach ein paar Sekunden „Sind Sie wieder da?“, dann liest er den Code vor → App **Gutscheine**.
+   - **💳 Kreditkarte**: Er liest Nummer, Ablaufdatum und Prüfnummer vor → App **Karte**. Bis Feierabend kann die Bank zurückbuchen.
+   Codes und Nummern werden nur vorgelesen, nicht angezeigt: gut zuhören und in der App **Notizen** mitschreiben.
 
 Außerdem:
 
-- **Scambaiter** machen verdächtig bereitwillig mit und verraten sich durch Kleinigkeiten (Tippgeräusche, Lachen, alberne Namen). Wer ihren Code einlöst, fängt sich einen Virus (−35 % der Tageseinnahmen). Rechtzeitig auflegen bringt Chef-Laune.
+- **Scambaiter** machen verdächtig bereitwillig mit und verraten sich durch Kleinigkeiten (Tippgeräusche, Lachen, alberne Namen). Wer bei ihnen abkassiert, fängt sich einen Virus (−35 % der Tageseinnahmen). Rechtzeitig auflegen bringt Chef-Laune.
 - **Der Chef** läuft regelmäßig durchs Büro. Wer dann nicht telefoniert, verdirbt ihm die Laune.
-- **Handy**: Der PC am Platz ist in drei Reiter aufgeteilt (Anrufe, Gespräch, Einlösen). Beim Abnehmen springt er automatisch zum Gespräch.
-- **Koop**: „Büro eröffnen“ erzeugt einen Code. Bis zu 6 Spieler teilen Büro, Quote und Kasse, sehen sich als Figuren mit Headset und können bei Kollegen mithören.
-- **Feierabend**: Quote verfehlt oder Chef sauer → Verwarnung, drei Verwarnungen = gefeuert. Nicht eingelöste Codes verfallen. 25 % der Einnahmen gehen aufs Teamkonto für Upgrades (Headset, Spickzettel, Kaffeemaschine, Premium-Leads, Baiter-Radar, Antivirus, Wegwerf-Terminal, Kiosk-Kontakt).
+- **Koop**: „Büro eröffnen“ erzeugt einen Code. Bis zu 6 Spieler teilen Büro, Quote und Kasse und sehen sich als Figuren mit Headset.
+- **Feierabend**: Quote verfehlt oder Chef sauer → Verwarnung, drei Verwarnungen = gefeuert. Nicht eingelöste Codes verfallen. 25 % der Einnahmen gehen aufs Teamkonto für Upgrades.
 
 ## Aufbau
 
@@ -58,7 +59,7 @@ Außerdem:
 | `server/ai.js` | Anrufer-KI: Claude und Offline-Fallback |
 | `server/data.js` | Namen, Macken, Upgrades, Beispielsätze |
 | `public/office3d.js` | Begehbares 3D-Büro (three.js): Schreibtische, Telefone, Chef, Kollegen, Whiteboard |
-| `public/client.js` | PC-Oberfläche am Platz, Gespräch, Spracheingabe/-ausgabe, Gutschein-Portal, Kartenterminal |
+| `public/client.js` | Telefon, PC-Apps (Gutscheine, Karte, FernViewer mit Online-Banking, Notizen), Spracheingabe/-ausgabe |
 | `public/index.html`, `public/style.css` | Bildschirme und Gestaltung |
 
 Der Server ist maßgeblich für den Spielzustand, der Browser stellt nur dar und schickt Aktionen. Ein Solo-Spiel ist ein Büro mit einem Spieler.

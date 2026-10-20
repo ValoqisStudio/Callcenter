@@ -65,7 +65,7 @@ const SCHEMA = {
     trust_delta: { type: "INTEGER" },
     hangs_up: { type: "BOOLEAN" },
     approach: { type: "STRING", enum: ["charme", "druck", "amt", "technik", "andere"] },
-    request: { type: "STRING", enum: ["none", "giftcard", "card"] },
+    request: { type: "STRING", enum: ["none", "giftcard", "card", "remote"] },
     complies: { type: "BOOLEAN" },
   },
   required: ["reply", "trust_delta", "hangs_up", "approach", "request", "complies"],

@@ -83,6 +83,7 @@ function addPlayer(room, name) {
     pos: { x: 0, z: 7, ry: 0 },
     callId: null,
     pending: [],
+    remote: null, // aktive Fernverbindung auf den PC eines Anrufers
     clients: new Set(),
     goneSince: null,
   };
@@ -137,6 +138,7 @@ function startDay(room) {
   for (const p of room.players.values()) {
     p.callId = null;
     p.pending = [];
+    p.remote = null;
   }
   Object.assign(room, {
     phase: "day",
@@ -152,7 +154,7 @@ function startDay(room) {
     bossVisit: 0,
     antivirusLeft: room.upgrades.has("antivirus") ? 1 : 0,
     chargebacks: [],
-    stats: { scammed: 0, missed: 0, baitersCaught: 0, viruses: 0, card: 0, giftcard: 0 },
+    stats: { scammed: 0, missed: 0, baitersCaught: 0, viruses: 0, card: 0, giftcard: 0, remote: 0 },
     review: null,
   });
   pushEvent(room, { type: "toast", text: `☀️ Tag ${room.day} beginnt. Quote: ${room.quota} €. Ab an den Platz!` });
@@ -191,6 +193,7 @@ function makeCaller(room) {
     awayCalled: false,
     giftcardsGiven: 0,
     cardGiven: false,
+    remoteGiven: false,
   };
 }
 
@@ -271,6 +274,7 @@ function endDay(room) {
     expired += p.pending.length;
     p.pending = [];
     p.callId = null;
+    p.remote = null;
   }
   room.calls = new Map();
   room.queue = [];
@@ -340,8 +344,14 @@ export async function handleAction(room, playerId, action) {
 
   switch (action.type) {
     case "answer": return answer(room, player, action.callId);
+    case "decline": return decline(room, player, action.callId);
     case "redeem": return redeem(room, player, action.code);
     case "card": return chargeCard(room, player, action);
+    case "connect": return connectRemote(room, player, action.code);
+    case "transfer": return transfer(room, player, action.amount);
+    case "disconnect":
+      player.remote = null;
+      return;
   }
 
   const call = player.callId && room.calls.get(player.callId);
@@ -391,6 +401,15 @@ function answer(room, player, callId) {
   player.callId = call.id;
   const shown = call.isBaiter ? call.alias : call.name;
   callerSays(call, pick(["Ja, hallo?", "Hallo? Bin ich da richtig?", `Hallo, hier ist ${shown.split(" ")[1]}?`, "Ja … hallo? Hört man mich?"]));
+}
+
+// Ablehnen: der Anruf verschwindet, der Chef sieht das nicht so gern
+function decline(room, player, callId) {
+  if (!player.seated) throw new GameError("Setz dich erst an deinen Platz.");
+  if (!room.queue.includes(callId)) return;
+  room.queue = room.queue.filter((x) => x !== callId);
+  room.calls.delete(callId);
+  room.bossMood = clamp(room.bossMood - 2, 0, 100);
 }
 
 async function say(room, player, call, rawText) {
@@ -446,6 +465,11 @@ async function say(room, player, call, rawText) {
     giveCard(player, call);
     return;
   }
+  if (allowed && result.request === "remote" && !call.remoteGiven) {
+    room.stats.remote++;
+    giveRemote(player, call);
+    return;
+  }
 
   if (call.patience <= 0) {
     callerSays(call, "So, ich hab jetzt keine Zeit mehr. Tschüss!");
@@ -490,6 +514,62 @@ function giveCard(player, call) {
   player.pending.push({ type: "card", ...card, amount: call.wallet, baiter: call.isBaiter, callId: call.id });
   call.wallet = 0;
   callerSays(call, `So, Brille auf … Die Nummer ist ${card.number}. Gültig bis ${card.expiry}. Und hinten steht ${card.cvc}.`, { secret: true });
+}
+
+function giveRemote(player, call) {
+  call.remoteGiven = true;
+  call.patience = Math.max(call.patience, 4);
+  const code = Array.from({ length: 3 }, () => String(randInt(100, 999))).join(" ");
+  player.pending.push({ type: "remote", code, callId: call.id, baiter: call.isBaiter });
+  callerSays(call, `So, das FernViewer-Programm ist offen. Da steht: Ihre ID ist ${code}.`, { secret: true });
+}
+
+// Mit dem vorgelesenen Code auf den PC des Anrufers verbinden (geht nur, solange er dran ist)
+function connectRemote(room, player, rawCode) {
+  if (!player.seated) throw new GameError("FernViewer gibt's nur am PC.");
+  const code = normalize(rawCode);
+  const item = player.pending.find((p) => p.type === "remote" && normalize(p.code) === code);
+  if (!item) {
+    pushEvent(room, { type: "toast", text: "❌ FernViewer: Unbekannte ID.", target: player.id, bad: true });
+    return;
+  }
+  const call = room.calls.get(item.callId);
+  if (!call || call.stage === "done" || call.owner !== player.id) {
+    player.pending = player.pending.filter((p) => p !== item);
+    pushEvent(room, { type: "toast", text: "❌ Verbindung fehlgeschlagen: Der Anrufer hat aufgelegt.", target: player.id, bad: true });
+    return;
+  }
+  player.pending = player.pending.filter((p) => p !== item);
+  player.remote = { callId: call.id, bank: pick(["Sparkasse Schilda", "Volksbank Pusemuckel", "Raiffeisen Buxtehude", "Kleinkleckersdorfer Bank"]) };
+  callerSays(call, pick(["Huch! Jetzt bewegt sich meine Maus ganz von alleine!", "Oh, da ist jetzt so ein Rahmen um meinen Bildschirm. Ist das normal?", "Ah, jetzt sehen Sie meinen Computer? Nicht erschrecken, der ist etwas unordentlich."]));
+}
+
+// Online-Banking auf dem PC des Anrufers: Geld überweisen, solange er nichts merkt
+function transfer(room, player, rawAmount) {
+  const r = player.remote;
+  const call = r && room.calls.get(r.callId);
+  if (!call || call.stage === "done") {
+    player.remote = null;
+    throw new GameError("Die Verbindung ist weg.");
+  }
+  const amount = Math.round(Number(rawAmount));
+  if (!Number.isFinite(amount) || amount <= 0) throw new GameError("Gib einen Betrag ein.");
+  if (amount > call.wallet) throw new GameError("So viel ist nicht auf dem Konto.");
+  if (call.isBaiter) {
+    payout(room, player, { amount, baiter: true, callId: call.id }, "remote");
+    return;
+  }
+  // Gierige Überweisungen fallen auf, wenn das Vertrauen nicht hoch genug ist
+  const greedy = amount > call.wallet * 0.6;
+  if (call.trust < COMPLY_TRUST || (greedy && call.trust < 90 && Math.random() < 0.35)) {
+    callerSays(call, pick(["Moment mal! Was machen Sie da auf meinem Konto?!", "Halt! Da steht Überweisung! Ich zieh jetzt den Stecker!"]));
+    player.remote = null;
+    endCall(room, call, "🏦 Der Anrufer hat die Überweisung bemerkt!");
+    return;
+  }
+  call.wallet -= amount;
+  payout(room, player, { amount, callId: call.id }, "remote");
+  if (call.stage !== "done") callerSays(call, pick(["Was war das für ein Piepen eben?", "Und, ist der Virus jetzt weg?", "Sie machen das aber schnell, junger Mensch!"]));
 }
 
 const normalize = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -546,7 +626,7 @@ function payout(room, player, item, method) {
   room.totalEarned += item.amount;
   room.stats.scammed++;
   room.bossMood = clamp(room.bossMood + 5, 0, 100);
-  pushEvent(room, { type: "cash", text: `💸 ${player.name}: +${item.amount} € (${method === "card" ? "Kreditkarte" : "Gutschein"})` });
+  pushEvent(room, { type: "cash", text: `💸 ${player.name}: +${item.amount} € (${{ card: "Kreditkarte", giftcard: "Gutschein", remote: "Überweisung" }[method]})` });
 }
 
 function hangUp(room, call) {
@@ -563,6 +643,7 @@ function endCall(room, call, message) {
   call.stage = "done";
   const owner = room.players.get(call.owner);
   if (owner && owner.callId === call.id) owner.callId = null;
+  if (owner && owner.remote && owner.remote.callId === call.id) owner.remote = null;
   if (message) pushEvent(room, { type: "toast", text: message, target: call.owner, bad: true });
   // Kurz sichtbar lassen, damit der Spieler die letzte Zeile sieht
   setTimeout(() => room.calls.delete(call.id), 3000);
@@ -608,6 +689,7 @@ export function view(room) {
     players: [...room.players.values()].map((p) => ({
       id: p.id, name: p.name, color: p.color, desk: p.desk, seated: p.seated, pos: p.pos,
       callId: p.callId, online: p.clients.size > 0,
+      remote: p.remote ? remoteView(room, p.remote) : null,
     })),
     elapsed: room.elapsed || 0,
     dayLength: room.dayLength || BASE_DAY_SECONDS,
@@ -634,6 +716,12 @@ export function callerLine(room, playerId, callId, index) {
   const line = call && call.history[offset + Number(index)];
   if (!line || line.role !== "caller") throw new GameError("Diese Zeile gibt es nicht.");
   return { call, text: line.text };
+}
+
+function remoteView(room, r) {
+  const call = room.calls.get(r.callId);
+  if (!call) return null;
+  return { callId: r.callId, owner: call.isBaiter ? call.alias : call.name, bank: r.bank, balance: call.wallet };
 }
 
 export function broadcast(room) {

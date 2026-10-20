@@ -96,85 +96,125 @@
     </div>
     <div id="boss-alert" class="boss-alert hidden">👔 Der Chef läuft durchs Büro! Alle ans Telefon!</div>
 
+    <!-- Am Platz: Telefon und PC -->
+    <div id="seat-bar" class="seat-bar hidden">
+      <button id="btn-open-pc" class="seat-btn">🖥️ PC <kbd>Q</kbd></button>
+      <button id="btn-stand" class="seat-btn">🚶 Aufstehen <kbd>Esc</kbd></button>
+    </div>
+
+    <div id="phone" class="phone hidden">
+      <div class="phone-top"><span id="phone-time">09:00</span><span>📶 🔋</span></div>
+
+      <div id="phone-idle" class="phone-screen">
+        <div class="phone-big-clock" id="phone-big-time">09:00</div>
+        <p class="hint">Warte auf Anrufe …</p>
+      </div>
+
+      <div id="phone-ringing" class="phone-screen ringing hidden">
+        <p class="phone-label">Eingehender Anruf</p>
+        <div class="phone-avatar pulse">📞</div>
+        <h3 id="ring-name">Unbekannt</h3>
+        <p id="ring-city" class="hint"></p>
+        <p id="ring-more" class="hint"></p>
+        <div class="phone-actions two">
+          <button id="btn-decline" class="round red" title="Ablehnen">📵</button>
+          <button id="btn-accept" class="round green" title="Annehmen">📞</button>
+        </div>
+      </div>
+
+      <div id="phone-call" class="phone-screen hidden">
+        <div class="trust-meter">
+          <span>Vertrauen</span>
+          <div class="bar"><div id="trust-bar" class="fill trust"></div></div>
+        </div>
+        <div id="caller-avatar" class="phone-avatar">👵</div>
+        <h3 id="caller-name">Name</h3>
+        <p id="call-timer" class="hint">00:00</p>
+        <p id="caller-tags" class="tags"></p>
+        <div id="call-status" class="call-status"></div>
+        <div id="subtitle" class="subtitle"></div>
+        <div id="my-line" class="my-line"></div>
+        <form id="chat-form" class="chat-form hidden">
+          <input id="in-say" maxlength="300" placeholder="Was sagst du?" autocomplete="off">
+          <button type="submit" id="btn-say">➤</button>
+        </form>
+        <div id="cheats" class="cheats hidden"></div>
+        <div class="phone-actions">
+          <button id="btn-mic" class="round" title="Freisprechen">🎤</button>
+          <button id="btn-keyboard" class="round" title="Tippen">⌨️</button>
+          <button id="btn-replay" class="round" title="Nochmal anhören">🔁</button>
+          <button id="btn-hangup" class="round red" title="Auflegen">📴</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Der PC am Platz -->
-    <div id="pc" class="pc hidden" data-tab="calls">
+    <div id="pc" class="pc hidden">
       <div class="pc-screen">
         <div class="pc-taskbar">
-          <span>🖥️ CallOS 98 · Platz <span id="pc-desk"></span></span>
-          <span id="pc-clock"></span>
-          <button id="btn-stand">Aufstehen [Esc]</button>
+          <span>🖥️ CallOS 98</span>
+          <nav class="pc-apps">
+            <button data-app="gift">🎁 Gutscheine</button>
+            <button data-app="card">💳 Karte</button>
+            <button data-app="remote">🖱️ FernViewer</button>
+            <button data-app="notes">📒 Notizen</button>
+          </nav>
+          <button id="btn-close-pc">✕</button>
         </div>
-        <nav class="pc-tabs">
-          <button data-tab="calls">📞 Anrufe <span id="tab-ring" class="badge hidden"></span></button>
-          <button data-tab="talk">💬 Gespräch</button>
-          <button data-tab="apps">🧾 Einlösen</button>
-        </nav>
         <div class="pc-body">
-          <aside class="pc-col" data-tab="calls">
-            <h3>📞 Eingehende Anrufe</h3>
-            <ul id="call-queue"></ul>
-            <p class="hint" id="queue-empty">Gerade ruhig … verdächtig ruhig.</p>
-
-            <div id="caller-box" class="caller-box hidden">
-              <div class="caller-card">
-                <div id="caller-avatar" class="avatar">👵</div>
-                <div class="caller-info">
-                  <h3 id="caller-name">Name</h3>
-                  <p id="caller-meta" class="hint"></p>
-                  <p id="caller-tags" class="tags"></p>
+          <section class="app-window" data-app="gift">
+            <h3>🎁 Gutschein-Portal</h3>
+            <p class="hint">Code eingeben, den der Anrufer vorgelesen hat.</p>
+            <form id="redeem-form" class="app-form">
+              <input id="in-gift" placeholder="XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false">
+              <button type="submit">Einlösen</button>
+            </form>
+          </section>
+          <section class="app-window" data-app="card">
+            <h3>💳 Kartenterminal</h3>
+            <form id="card-form" class="app-form card-form">
+              <input id="card-number" inputmode="numeric" placeholder="Kartennummer" autocomplete="off">
+              <input id="card-expiry" placeholder="MM/JJ" autocomplete="off">
+              <input id="card-cvc" inputmode="numeric" placeholder="CVC" autocomplete="off">
+              <button type="submit">Abbuchen</button>
+            </form>
+            <p class="hint small">Bis Feierabend kann die Bank zurückbuchen.</p>
+          </section>
+          <section class="app-window" data-app="remote">
+            <div id="remote-connect">
+              <h3>🖱️ FernViewer</h3>
+              <p class="hint">Lass den Anrufer FernViewer installieren und dir seine ID vorlesen. Er muss dabei am Telefon bleiben.</p>
+              <form id="connect-form" class="app-form">
+                <input id="in-remote" inputmode="numeric" placeholder="123 456 789" autocomplete="off">
+                <button type="submit">Verbinden</button>
+              </form>
+            </div>
+            <div id="remote-desktop" class="remote-desktop hidden">
+              <div class="remote-title"><span>🖱️ Verbunden mit <b id="remote-owner"></b></span><button id="btn-disconnect">Trennen</button></div>
+              <div class="desktop">
+                <div class="desktop-icons">
+                  <button class="desk-icon" data-open="bank">🏦<span>Online-Banking</span></button>
+                  <button class="desk-icon" data-joke="photos">🖼️<span>Enkel_Fotos</span></button>
+                  <button class="desk-icon" data-joke="recipes">📄<span>Rezepte.doc</span></button>
+                  <button class="desk-icon" data-joke="trash">🗑️<span>Papierkorb</span></button>
+                  <button class="desk-icon" data-joke="solitaire">🃏<span>Solitär</span></button>
+                </div>
+                <div id="bank-window" class="bank-window hidden">
+                  <div class="bank-head"><b id="bank-name"></b><button id="btn-bank-close">✕</button></div>
+                  <p>Kontostand: <b id="bank-balance"></b></p>
+                  <form id="transfer-form" class="app-form">
+                    <input id="in-amount" inputmode="numeric" placeholder="Betrag in €" autocomplete="off">
+                    <button type="submit">Überweisen</button>
+                  </form>
+                  <p class="hint small">Empfänger: Call Center GmbH · Verwendungszweck: Virenentfernung. Zu gierig? Dann merkt er's vielleicht.</p>
                 </div>
               </div>
-              <div class="meter">
-                <span>Vertrauen <b id="trust-delta" class="delta"></b></span>
-                <div class="bar"><div id="trust-bar" class="fill trust"></div></div>
-              </div>
-              <div class="meter">
-                <span>Geduld</span>
-                <div class="bar"><div id="patience-bar" class="fill patience"></div></div>
-              </div>
-              <button id="btn-hangup" class="danger">📴 Auflegen</button>
             </div>
-
-            <h3 class="sub">🎧 Kollegen</h3>
-            <ul id="team-calls"></ul>
-            <p class="hint" id="team-empty">Niemand telefoniert.</p>
-          </aside>
-
-          <section class="pc-col pc-main" data-tab="talk">
-            <div id="dialog" class="dialog">
-              <p class="hint dialog-empty">Kein Gespräch. Nimm einen Anruf an.</p>
-            </div>
-            <div id="talk-row" class="talk-row">
-              <button id="btn-mic" class="mic" title="Sprechen (Taste V gedrückt halten)">🎤</button>
-              <input id="in-say" maxlength="300" placeholder="Was sagst du? (Enter zum Senden)" autocomplete="off">
-              <button id="btn-say">Sagen</button>
-            </div>
-            <div id="cheats" class="cheats"></div>
           </section>
-
-          <aside class="pc-col" data-tab="apps">
-            <div class="app">
-              <h3>🎁 Gutschein-Portal</h3>
-              <form id="redeem-form" class="app-form">
-                <input id="in-gift" placeholder="XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false">
-                <button type="submit">Einlösen</button>
-              </form>
-            </div>
-            <div class="app">
-              <h3>💳 Kartenterminal</h3>
-              <form id="card-form" class="app-form card-form">
-                <input id="card-number" inputmode="numeric" placeholder="Kartennummer" autocomplete="off">
-                <input id="card-expiry" placeholder="MM/JJ" autocomplete="off">
-                <input id="card-cvc" inputmode="numeric" placeholder="CVC" autocomplete="off">
-                <button type="submit">Abbuchen</button>
-              </form>
-              <p class="hint small">Bis Feierabend kann die Bank zurückbuchen.</p>
-            </div>
-            <div class="app grow">
-              <h3>📒 Notizblock</h3>
-              <textarea id="notes" placeholder="Codes und Kartennummern hier mitschreiben …" spellcheck="false"></textarea>
-            </div>
-          </aside>
+          <section class="app-window" data-app="notes">
+            <h3>📒 Notizblock</h3>
+            <textarea id="notes" placeholder="Codes und Kartennummern hier mitschreiben …" spellcheck="false"></textarea>
+          </section>
         </div>
       </div>
     </div>

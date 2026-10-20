@@ -43,8 +43,8 @@ const SCHEMA = {
     approach: { type: "string", enum: ["charme", "druck", "amt", "technik", "andere"] },
     request: {
       type: "string",
-      enum: ["none", "giftcard", "card"],
-      description: "Was der Mitarbeiter in seinem letzten Satz von dir verlangt: Gutscheinkarten kaufen (giftcard), Kreditkartendaten (card) oder nichts davon (none).",
+      enum: ["none", "giftcard", "card", "remote"],
+      description: "Was der Mitarbeiter in seinem letzten Satz von dir verlangt: Gutscheinkarten kaufen (giftcard), Kreditkartendaten (card), ein Fernwartungsprogramm installieren und den Verbindungscode vorlesen (remote) oder nichts davon (none).",
     },
     complies: { type: "boolean", description: "true, wenn du der Aufforderung (request) jetzt nachkommst." },
   },
@@ -77,11 +77,12 @@ Bewertung (trust_delta):
 - Leg auf (hangs_up: true), wenn du beleidigt wirst, das Vertrauen tief im Keller ist oder deine Geduld aufgebraucht ist und dich der letzte Satz nicht überzeugt hat.
 
 Aufforderungen (request / complies):
-- Verlangt der Mitarbeiter, dass du Gutscheinkarten (Google Play, iTunes, Paysafe, Guthabenkarten …) kaufst oder holst: request "giftcard". Verlangt er Kreditkarten- oder Bankkartendaten: request "card".
+- Verlangt der Mitarbeiter, dass du Gutscheinkarten (Google Play, iTunes, Paysafe, Guthabenkarten …) kaufst oder holst: request "giftcard". Verlangt er Kreditkarten- oder Bankkartendaten: request "card". Verlangt er, dass du ein Fernwartungsprogramm (FernViewer, AnyViewer, TeamViewer …) installierst und ihm den Code vorliest, damit er auf deinen Computer kann: request "remote".
 - Bietet er dir mehrere Zahlungswege an ("per Gutschein oder Karte"), such dir einen aus, der zu dir passt, und setz request entsprechend.
 - Mach nur mit (complies: true), wenn dein Vertrauen nach diesem Zug bei mindestens ${COMPLY_TRUST} liegt und du noch Geld übrig hast. Sonst zier dich, frag nach oder lehn ab.
 - Bei giftcard und complies: Sag, dass du schnell zum Kiosk gehst und gleich wieder da bist (z. B. "Na gut, ich lauf schnell rüber, bleiben Sie dran!"). Nenne keinen Code.
-- Bei card und complies: Sag, dass du die Karte holst und gleich vorliest. Nenne keine Nummer.`;
+- Bei card und complies: Sag, dass du die Karte holst und gleich vorliest. Nenne keine Nummer.
+- Bei remote und complies: Sag, dass du das Programm installierst bzw. es jetzt offen ist. Nenne keinen Code.`;
 }
 
 function transcript(c) {
@@ -95,6 +96,7 @@ function turnPrompt(c) {
   const given = [];
   if (c.giftcardsGiven) given.push(`${c.giftcardsGiven} Gutscheinkarte(n)`);
   if (c.cardGiven) given.push("deine Kreditkartendaten");
+  if (c.remoteGiven) given.push("einen Fernzugriff auf deinen Computer");
   return `Gesprächsverlauf:
 ${transcript(c)}
 
@@ -152,7 +154,7 @@ function normalize(out) {
     trustDelta: Math.max(-30, Math.min(50, Math.round(Number(out.trust_delta) || 0))),
     hangsUp: !!out.hangs_up,
     approach: CATEGORIES[out.approach] ? out.approach : "andere",
-    request: ["giftcard", "card"].includes(out.request) ? out.request : "none",
+    request: ["giftcard", "card", "remote"].includes(out.request) ? out.request : "none",
     complies: !!out.complies,
   };
 }
@@ -169,6 +171,7 @@ const KEYWORDS = {
 };
 const GIFTCARD_WORDS = ["gutschein", "guthaben", "google play", "itunes", "apple karte", "paysafe", "steam karte", "geschenkkarte", "kiosk", "tankstelle", "karten kaufen", "karte kaufen"];
 const CARD_WORDS = ["kreditkart", "kartennummer", "bankkarte", "ec-karte", "visa", "mastercard", "prüfnummer", "cvc", "ablaufdatum", "ihre karte", "per karte", "mit karte", "überweis"];
+const REMOTE_WORDS = ["fernzugriff", "fernviewer", "anyviewer", "teamviewer", "fernwartung", "programm installieren", "app installieren", "herunterladen", "bildschirm teilen", "auf ihren computer", "auf ihren rechner", "verbindungscode", "code vorlesen"];
 const INSULTS = ["idiot", "dumm", "blöd", "halt die", "halts maul", "trottel", "depp", "alte schachtel", "vollpfosten"];
 
 const REPLIES = {
@@ -181,6 +184,7 @@ const REPLIES = {
   refuse: ["Gutscheine? Wofür das denn? Nee, also da bin ich mir nicht sicher …", "Meine Karte? Das kommt mir aber komisch vor.", "Also das muss ich mir erst nochmal überlegen."],
   broke: ["Mehr Geld hab ich nicht, junger Mann! Das war meine ganze Rente!", "Nee, jetzt ist das Konto leer. Ehrlich."],
   goGift: ["Na gut, ich lauf schnell zum Kiosk rüber. Bleiben Sie dran!", "Okay, okay, ich hol die Karten. Moment, wo sind meine Schuhe … bin gleich zurück!"],
+  goRemote: ["Ach so, so ein Programm … warten Sie … ja, jetzt ist es installiert. Da steht eine Nummer.", "FernViewer? Moment, ich klick mal … ja, hier, da ist es!"],
   goCard: ["Moment, ich hol meine Karte aus dem Portemonnaie.", "Na gut, warten Sie, die Karte ist hier irgendwo …"],
   baiter: [
     "Klar, mache ich sofort! *tippt hörbar sehr schnell*",
@@ -216,6 +220,7 @@ function classify(text) {
 
 function detectRequest(text) {
   const t = text.toLowerCase();
+  if (REMOTE_WORDS.some((w) => t.includes(w))) return "remote";
   const gift = GIFTCARD_WORDS.some((w) => t.includes(w));
   const card = CARD_WORDS.some((w) => t.includes(w));
   // Beides angeboten: der Anrufer sucht sich etwas aus
@@ -262,10 +267,11 @@ function offlineTurn(c) {
 
   const trustAfter = c.trust + delta;
   if (request !== "none") {
-    const already = request === "card" && c.cardGiven;
+    const already = (request === "card" && c.cardGiven) || (request === "remote" && c.remoteGiven);
     if (c.wallet < 20 || already) return { reply: pick(REPLIES.broke), trustDelta: Math.min(delta, 0), hangsUp: false, approach: cleanApproach, request, complies: false };
     if (trustAfter >= COMPLY_TRUST || c.isBaiter) {
-      return { reply: pick(request === "giftcard" ? REPLIES.goGift : REPLIES.goCard), trustDelta: delta, hangsUp: false, approach: cleanApproach, request, complies: true };
+      const pool2 = request === "giftcard" ? REPLIES.goGift : request === "remote" ? REPLIES.goRemote : REPLIES.goCard;
+      return { reply: pick(pool2), trustDelta: delta, hangsUp: false, approach: cleanApproach, request, complies: true };
     }
     return { reply: pick(REPLIES.refuse), trustDelta: delta - 5, hangsUp: false, approach: cleanApproach, request, complies: false };
   }

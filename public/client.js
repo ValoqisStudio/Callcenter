@@ -230,6 +230,7 @@ function startListening() {
     if (!text) return;
     heardSomething = true;
     $("in-say").value = text;
+    $("my-line").textContent = `🎤 ${text}`;
     clearTimeout(sendTimer);
     // Kurze Pause nach dem Sprechen = fertig, dann automatisch senden
     sendTimer = setTimeout(stopListening, interim.trim() ? 1400 : 700);
@@ -415,24 +416,32 @@ function ensureOffice() {
   }, 150);
 }
 
+let pcOpen = false;
+let pcApp = "gift";
+let keyboardOpen = !Recognition; // ohne Spracheingabe gleich tippen
+const callStart = new Map();
+
 function sitDown() {
   const p = me();
   if (!p || seated || state.phase !== "day") return;
   seated = true;
   office.sitAt(p.desk);
   act({ type: "sit", seated: true });
-  setPcTab(me().callId ? "talk" : "calls");
   renderOverlays();
-  if (!IS_TOUCH) setTimeout(() => $("in-say").focus(), 400);
+  renderSeat();
 }
 
-// Auf dem Handy zeigt der PC immer nur einen Bereich (Anrufe, Gespräch, Einlösen)
-function setPcTab(tab) {
-  $("pc").dataset.tab = tab;
-  if (tab === "talk") {
-    const d = $("dialog");
-    d.scrollTop = d.scrollHeight;
-  }
+function openPc(app) {
+  pcOpen = true;
+  if (app) pcApp = app;
+  renderPcApps();
+  renderOverlays();
+}
+
+function closePc() {
+  pcOpen = false;
+  document.activeElement?.blur();
+  renderOverlays();
 }
 
 function standUp() {
@@ -440,6 +449,7 @@ function standUp() {
   stopListening();
   stopSpeaking();
   seated = false;
+  pcOpen = false;
   office.stand();
   act({ type: "sit", seated: false });
   document.activeElement?.blur();
@@ -478,10 +488,11 @@ function render() {
     }
     if (phase !== "day" && seated) {
       seated = false;
+      pcOpen = false;
       office.stand();
     }
     renderHud();
-    if (seated) renderPc();
+    if (seated) renderSeat();
   }
   renderOverlays();
   $("review").classList.toggle("hidden", phase !== "review");
@@ -495,7 +506,9 @@ function renderOverlays() {
   if (!state || state.phase === "lobby") return;
   const day = state.phase === "day";
   const locked = office && office.isActive();
-  $("pc").classList.toggle("hidden", !(day && seated));
+  $("pc").classList.toggle("hidden", !(day && seated && pcOpen));
+  $("phone").classList.toggle("hidden", !(day && seated));
+  $("seat-bar").classList.toggle("hidden", !(day && seated));
   $("click-to-play").classList.toggle("hidden", !day || seated || locked);
   $("crosshair").classList.toggle("hidden", !locked);
   if (!locked) $("focus-hint").classList.add("hidden");
@@ -539,166 +552,136 @@ function renderHud() {
   $("boss-alert").classList.toggle("hidden", !(state.phase === "day" && state.bossVisit > 0));
 }
 
-function renderPc() {
-  const waiting = state.queue.length;
-  $("tab-ring").textContent = waiting;
-  $("tab-ring").classList.toggle("hidden", !waiting || !!me().callId);
-  $("pc-desk").textContent = me().desk + 1;
-  $("pc-clock").textContent = `${clockText()} Uhr`;
-  renderQueue();
-  renderCall();
+function renderSeat() {
+  renderPhone();
+  if (pcOpen) renderPcApps();
 }
 
-function renderQueue() {
-  const ul = $("call-queue");
-  const busy = !!(me() && me().callId);
-  const ringing = state.queue.map((id) => state.calls.find((c) => c.id === id)).filter(Boolean);
-  // Nur neu aufbauen, wenn sich die Liste ändert, sonst nur die Balken bewegen
-  const key = ringing.map((c) => c.id).join(",") + busy;
-  if (ul.dataset.key !== key) {
-    ul.dataset.key = key;
-    ul.innerHTML = "";
-    for (const c of ringing) {
-      const li = document.createElement("li");
-      li.className = "call-item";
-      li.dataset.id = c.id;
-      li.innerHTML = `<span>📳</span><div class="who">Anruf aus ${escapeHtml(c.city)}<div class="wait"></div></div>`;
-      const btn = document.createElement("button");
-      btn.textContent = "Abnehmen";
-      btn.disabled = busy;
-      btn.onclick = () => {
-        btn.disabled = true;
-        watchCallId = null;
-        lastCall = null;
-        sfx.pickup();
-        act({ type: "answer", callId: c.id });
-        setPcTab("talk");
-        if (!IS_TOUCH) setTimeout(() => $("in-say").focus(), 200);
-      };
-      li.appendChild(btn);
-      ul.appendChild(li);
-    }
-  }
-  for (const li of ul.children) {
-    const c = state.calls.find((x) => x.id === li.dataset.id);
-    if (c) li.querySelector(".wait").style.width = `${100 - (c.waited / state.ringTimeout) * 100}%`;
-  }
-  $("queue-empty").classList.toggle("hidden", ringing.length > 0);
-
-  const team = state.calls.filter((c) => c.owner && c.owner !== session.playerId && c.stage !== "done");
-  $("team-calls").innerHTML = "";
-  for (const c of team) {
-    const owner = state.players.find((p) => p.id === c.owner);
-    const li = document.createElement("li");
-    li.style.borderColor = owner ? owner.color : "";
-    li.className = watchCallId === c.id ? "watching" : "";
-    li.innerHTML = `${owner ? escapeHtml(owner.name) : "?"} ↔ ${escapeHtml(c.name)} <span class="hint">(mithören)</span>`;
-    li.onclick = () => { watchCallId = watchCallId === c.id ? null : c.id; render(); };
-    $("team-calls").appendChild(li);
-  }
-  $("team-empty").classList.toggle("hidden", team.length > 0);
+function ringingCalls() {
+  return state.queue.map((id) => state.calls.find((c) => c.id === id)).filter(Boolean);
 }
 
 let renderedCallId = null;
-let renderedHistory = 0;
 let spokenUpTo = 0;
 
-function renderCall() {
-  let call = myCall();
-  let readonly = false;
-  if (call) {
-    lastCall = call;
-  } else if (watchCallId) {
-    call = state.calls.find((c) => c.id === watchCallId) || null;
-    if (!call) watchCallId = null;
-    readonly = !!call;
-  }
-  // Nach dem Auflegen bleibt das letzte Gespräch lesbar (z. B. um den Code nachzulesen)
-  if (!call && lastCall) call = { ...lastCall, stage: "done", busy: false };
+function renderPhone() {
+  const time = clockText();
+  $("phone-time").textContent = time;
+  $("phone-big-time").textContent = time;
 
-  $("caller-box").classList.toggle("hidden", !call);
-  $("pc").classList.toggle("readonly", readonly || !call || call.stage === "done");
-  if (!call) {
-    renderedCallId = null;
-    $("dialog").innerHTML = `<p class="hint dialog-empty">Kein Gespräch. Nimm einen Anruf an.</p>`;
-    $("talk-row").classList.add("hidden");
-    $("cheats").classList.add("hidden");
+  const active = myCall();
+  if (active) lastCall = active;
+  const ringing = ringingCalls();
+  const inCall = active && active.stage !== "done";
+  const mode = inCall ? "call" : ringing.length ? "ringing" : active ? "call" : "idle";
+
+  $("phone-idle").classList.toggle("hidden", mode !== "idle");
+  $("phone-ringing").classList.toggle("hidden", mode !== "ringing");
+  $("phone-call").classList.toggle("hidden", mode !== "call");
+  $("phone").classList.toggle("ringing", mode === "ringing");
+
+  if (mode === "ringing") {
+    $("ring-name").textContent = "Unbekannte Nummer";
+    $("ring-city").textContent = `aus ${ringing[0].city}`;
+    $("ring-more").textContent = ringing.length > 1 ? `+${ringing.length - 1} weitere in der Leitung` : "";
     return;
   }
+  if (mode !== "call") {
+    renderedCallId = null;
+    return;
+  }
+  renderCall(active);
+}
 
+function lastOf(call, role) {
+  for (let i = call.history.length - 1; i >= 0; i--) if (call.history[i].role === role) return { m: call.history[i], i };
+  return null;
+}
+
+function maskSecret(text) {
+  const body = escapeHtml(text);
+  if (!(voiceOn && (config.tts || germanVoices.length))) return body;
+  // Codes und Nummern nur vorlesen, nicht anzeigen: Mitschreiben ist Teil des Spiels
+  return body
+    .replace(CODE_RE, (c) => `<span class="secret">${c.replace(/[A-Z0-9]/g, "•")}</span>`)
+    .replace(/\d[\d ,/]*\d/g, (x) => `<span class="secret">${x.replace(/\d/g, "•")}</span>`);
+}
+
+function renderCall(call) {
   if (call.id !== renderedCallId) {
     renderedCallId = call.id;
-    renderedHistory = 0;
-    spokenUpTo = readonly ? call.history.length : 0;
-    $("dialog").innerHTML = "";
+    spokenUpTo = 0;
     $("in-say").value = "";
+    $("my-line").textContent = "";
     stopSpeaking();
   }
+  if (!callStart.has(call.id)) callStart.set(call.id, Date.now());
+
+  // Neue Sätze des Anrufers vorlesen
+  for (let i = spokenUpTo; i < call.history.length; i++) {
+    if (call.history[i].role === "caller") speak(call, call.history[i].text, i);
+  }
+  spokenUpTo = call.history.length;
 
   $("caller-avatar").textContent = call.avatar;
   $("caller-name").textContent = call.name;
-  $("caller-meta").textContent = `${call.age} Jahre · ${call.city}`;
+  const secs = Math.floor((Date.now() - callStart.get(call.id)) / 1000);
+  $("call-timer").textContent = call.stage === "done" ? "Anruf beendet" : `${String(Math.floor(secs / 60)).padStart(2, "0")}:${String(secs % 60).padStart(2, "0")}`;
+  $("trust-bar").style.width = `${call.trust}%`;
+
   const tags = [];
-  if (call.stage === "away") tags.push(`<span>🚶 unterwegs</span>`);
-  if (call.stage === "done") tags.push(`<span>aufgelegt</span>`);
   if (call.skeptical) tags.push(`<span>misstrauisch</span>`);
   if (call.weakness) tags.push(`<span class="weak">Schwäche: ${config.categories[call.weakness]}</span>`);
   if (call.baiter) tags.push(`<span class="baiter">⚠️ Scambaiter!</span>`);
-  if (readonly) tags.push(`<span>👂 du hörst mit</span>`);
   $("caller-tags").innerHTML = tags.join("");
 
-  $("trust-bar").style.width = `${call.trust}%`;
-  $("patience-bar").style.width = `${(call.patience / call.maxPatience) * 100}%`;
-  const d = $("trust-delta");
-  if (call.lastDelta) {
-    d.textContent = `${call.lastDelta > 0 ? "+" : ""}${call.lastDelta}`;
-    d.className = `delta ${call.lastDelta > 0 ? "up" : "down"}`;
-  } else {
-    d.textContent = "";
+  let status = "";
+  if (call.stage === "done") status = "📴 aufgelegt";
+  else if (call.stage === "away") status = "🚶 ist unterwegs … frag gleich, ob er wieder da ist";
+  else if (call.busy) status = "💭 überlegt …";
+  else if (currentAudio || ("speechSynthesis" in window && speechSynthesis.speaking)) status = `<span class="wave"><i></i><i></i><i></i><i></i></span> spricht`;
+  else if (listening) status = "🎤 hört dir zu …";
+  $("call-status").innerHTML = status;
+
+  // Untertitel: nur der aktuelle Satz (oder ein Hinweis wie "keine Antwort")
+  const lastMsg = call.history[call.history.length - 1];
+  const lastCaller = lastOf(call, "caller");
+  if (lastMsg && lastMsg.role === "sys") $("subtitle").innerHTML = `<i>${escapeHtml(lastMsg.text)}</i>`;
+  else $("subtitle").innerHTML = lastCaller ? maskSecret(lastCaller.m.text) : "";
+  if (!listening) {
+    const mine = lastOf(call, "player");
+    $("my-line").textContent = mine ? `Du: ${mine.m.text}` : "";
   }
 
-  // Neue Nachrichten anhängen
-  const dialog = $("dialog");
-  dialog.querySelector(".typing")?.remove();
-  for (let i = renderedHistory; i < call.history.length; i++) {
-    const m = call.history[i];
-    const div = document.createElement("div");
-    div.className = `msg ${m.role === "player" ? "me" : m.role === "caller" ? "them" : "sys"}`;
-    let body = escapeHtml(m.text);
-    // Codes und Kartendaten nur vorlesen, nicht anzeigen: Mitschreiben ist Teil des Spiels
-    if (m.secret && voiceOn && (config.tts || germanVoices.length) && !readonly) {
-      body = body
-        .replace(CODE_RE, (c) => `<span class="secret" title="Hör genau hin!">${c.replace(/[A-Z0-9]/g, "•")}</span>`)
-        .replace(/\d[\d ,/]*\d/g, (x) => `<span class="secret" title="Hör genau hin!">${x.replace(/\d/g, "•")}</span>`)
-        + ` <button class="replay" title="Nochmal vorlesen">🔁</button>`;
-    }
-    div.innerHTML = (m.by && m.role === "player" ? `<span class="by">${escapeHtml(m.by)}</span>` : "") + body;
-    const snapshot = call;
-    const index = i;
-    div.querySelector(".replay")?.addEventListener("click", () => speak(snapshot, m.text, index));
-    dialog.appendChild(div);
-    if (m.role === "caller" && i >= spokenUpTo) speak(call, m.text, i);
-  }
-  spokenUpTo = Math.max(spokenUpTo, call.history.length);
-  renderedHistory = call.history.length;
-  if (call.busy) {
-    const t = document.createElement("div");
-    t.className = "msg them typing";
-    t.textContent = `${call.name.split(" ")[0]} überlegt …`;
-    dialog.appendChild(t);
-  }
-  dialog.scrollTop = dialog.scrollHeight;
-
-  const talk = canTalk(call) && !readonly;
-  $("talk-row").classList.toggle("hidden", call.stage === "done");
-  $("cheats").classList.toggle("hidden", call.stage !== "talk");
+  const talk = canTalk(call);
+  $("chat-form").classList.toggle("hidden", !keyboardOpen || call.stage === "done");
+  $("cheats").classList.toggle("hidden", !keyboardOpen || call.stage !== "talk");
+  $("btn-keyboard").classList.toggle("on", keyboardOpen);
+  $("phone").classList.toggle("typing", keyboardOpen);
   $("in-say").disabled = !talk;
   $("btn-say").disabled = !talk;
-  $("btn-mic").disabled = !Recognition || readonly;
+  $("btn-hangup").disabled = call.stage === "done";
+  $("btn-replay").disabled = !lastCaller;
+  $("btn-mic").disabled = !Recognition;
   if (!Recognition) $("btn-mic").title = "Spracheingabe wird von diesem Browser nicht unterstützt (Chrome/Edge nutzen)";
   if (!talk && listening) stopListening();
   updateMicButton();
   micTick();
+}
+
+function renderPcApps() {
+  document.querySelectorAll(".pc-apps button").forEach((b) => b.classList.toggle("active", b.dataset.app === pcApp));
+  document.querySelectorAll(".app-window").forEach((w) => w.classList.toggle("active", w.dataset.app === pcApp));
+  const r = me() && me().remote;
+  $("remote-connect").classList.toggle("hidden", !!r);
+  $("remote-desktop").classList.toggle("hidden", !r);
+  if (r) {
+    $("remote-owner").textContent = r.owner;
+    $("bank-name").textContent = r.bank;
+    $("bank-balance").textContent = euro(r.balance);
+  } else {
+    $("bank-window").classList.add("hidden");
+  }
 }
 
 function renderCheats() {
@@ -721,6 +704,7 @@ function renderCheats() {
     "Holen Sie bitte eine Gutscheinkarte von der Tankstelle, damit bezahlen wir die Reparatur.",
   ]);
   add("💳 Karte verlangen", "ask-card", ["Zur Bestätigung lesen Sie mir bitte Ihre Kreditkartennummer, das Ablaufdatum und die Prüfnummer vor."]);
+  add("🖱️ Fernzugriff", "ask-remote", ["Damit ich den Virus entfernen kann, installieren Sie bitte das Programm FernViewer und lesen mir Ihre ID vor."]);
 }
 
 function renderReview() {
@@ -792,11 +776,9 @@ $("btn-start").onclick = () => act({ type: "start" });
 $("btn-next-day").onclick = () => act({ type: "start" });
 $("btn-restart").onclick = () => act({ type: "restart" });
 $("btn-hangup").onclick = () => { stopSpeaking(); act({ type: "hangup" }); };
-$("btn-say").onclick = sendSay;
 $("btn-stand").onclick = standUp;
 $("btn-goto-desk").onclick = goToDesk;
 $("click-to-play").onclick = () => office && office.activate();
-$("in-say").addEventListener("keydown", (e) => { if (e.key === "Enter") sendSay(); });
 $("btn-voice").onclick = () => {
   voiceOn = !voiceOn;
   store("voiceOn", voiceOn);
@@ -833,7 +815,14 @@ document.addEventListener("keydown", (e) => {
   if (!state || state.phase !== "day") return;
   if (e.key === "Escape" && seated) {
     if (typingTarget(document.activeElement)) document.activeElement.blur();
+    else if (pcOpen) closePc();
     else standUp();
+    return;
+  }
+  if (e.key.toLowerCase() === "q" && seated && !typingTarget(document.activeElement)) {
+    e.preventDefault();
+    if (pcOpen) closePc();
+    else openPc();
     return;
   }
   if (e.key === "Tab" && !seated && !typingTarget(document.activeElement)) {
@@ -862,17 +851,70 @@ window.callcenter = {
 // Start
 // ---------------------------------------------------------------------------
 
-document.querySelectorAll(".pc-tabs button").forEach((b) => { b.onclick = () => setPcTab(b.dataset.tab); });
-// Nach einem Einlöse-Versuch auf dem Handy wieder zum Gespräch
-$("redeem-form").addEventListener("submit", () => { if (IS_TOUCH && myCall() && myCall().stage !== "done") setTimeout(() => setPcTab("talk"), 600); });
+$("chat-form").onsubmit = (e) => {
+  e.preventDefault();
+  sendSay();
+};
+$("btn-accept").onclick = () => {
+  const c = ringingCalls()[0];
+  if (!c) return;
+  sfx.pickup();
+  watchCallId = null;
+  act({ type: "answer", callId: c.id });
+  if (keyboardOpen && !IS_TOUCH) setTimeout(() => $("in-say").focus(), 200);
+};
+$("btn-decline").onclick = () => {
+  const c = ringingCalls()[0];
+  if (c) act({ type: "decline", callId: c.id });
+};
+$("btn-keyboard").onclick = () => {
+  keyboardOpen = !keyboardOpen;
+  renderSeat();
+  if (keyboardOpen) $("in-say").focus();
+};
+$("btn-replay").onclick = () => {
+  const c = myCall() || lastCall;
+  const last = c && lastOf(c, "caller");
+  if (last) {
+    stopSpeaking();
+    speak(c, last.m.text, last.i);
+  }
+};
+$("btn-open-pc").onclick = () => (pcOpen ? closePc() : openPc());
+$("btn-close-pc").onclick = closePc;
+document.querySelectorAll(".pc-apps button").forEach((b) => { b.onclick = () => openPc(b.dataset.app); });
+$("connect-form").onsubmit = (e) => {
+  e.preventDefault();
+  const code = $("in-remote").value.trim();
+  if (!code) return;
+  act({ type: "connect", code });
+  $("in-remote").value = "";
+};
+$("btn-disconnect").onclick = () => act({ type: "disconnect" });
+document.querySelectorAll(".desk-icon[data-open]").forEach((b) => { b.onclick = () => $("bank-window").classList.remove("hidden"); });
+$("btn-bank-close").onclick = () => $("bank-window").classList.add("hidden");
+const JOKES = {
+  photos: "🖼️ 412 Fotos von Kürbissen. Und eins vom Enkel.",
+  recipes: "📄 „Omas Streuselkuchen – streng geheim!“",
+  trash: "🗑️ Der Papierkorb ist voll mit Kettenbriefen.",
+  solitaire: "🃏 Highscore: 3 Punkte.",
+};
+document.querySelectorAll(".desk-icon[data-joke]").forEach((b) => { b.onclick = () => toast(JOKES[b.dataset.joke]); });
+$("transfer-form").onsubmit = (e) => {
+  e.preventDefault();
+  const amount = Number($("in-amount").value.replace(/[^\d]/g, ""));
+  if (!amount) return;
+  act({ type: "transfer", amount });
+  $("in-amount").value = "";
+};
 
 (async function init() {
   if (IS_TOUCH) {
     $("ctp-title").textContent = "👆 Tippen zum Spielen";
     $("ctp-keys").innerHTML = "Links mit dem <b>Joystick</b> laufen · rechts <b>wischen</b> zum Umsehen · <b>✋</b> zum Benutzen · <b>🪑</b> oben springt direkt an deinen Platz";
     $("crosshair").textContent = "•";
-    $("btn-stand").textContent = "Aufstehen";
-    $("in-say").placeholder = "Was sagst du?";
+    $("btn-stand").textContent = "🚶 Aufstehen";
+    $("btn-open-pc").textContent = "🖥️ PC";
   }
   $("in-name").value = store("name") || "";
   try {
